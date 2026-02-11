@@ -1,0 +1,85 @@
+# Fantasy Baseball Pro 配置文件
+# 版本: 2026.0
+
+# 数据处理配置
+data:
+  # 是否启用多源预测融合
+  use_multi_source: true
+  # 数据文件命名模板
+  file_patterns:
+    hitters: "hitters_2026_{source}.csv"
+    pitchers: "pitchers_2026_{source}.csv"
+  # 位置映射文件
+  positions_file: "data/player_positions_2025.csv"
+
+# 预测源权重配置
+projections:
+  # 权重分配（总和必须为1.0）
+  weights:
+    STEAMER: 0.7
+    ZIPS: 0.3
+    # THE_BAT: 0.0
+  # 支持的预测源
+  sources:
+    - STEAMER
+    - ZIPS
+    # - THE_BAT
+
+# 联盟规则配置
+league:
+  # 联盟规模
+  size: 12
+  # 选秀轮数
+  rounds: 15
+  # 阵容槽位
+  roster_slots:
+    C: 1
+    1B: 1
+    2B: 1
+    3B: 1
+    SS: 1
+    OF: 4
+    SP: 4
+    RP: 3
+    UTIL: 1
+  # 评分规则
+  scoring:
+    # 打者评分（正值为加分，负值为减分）
+    hitters:
+      R: 1      # 得分
+      HR: 1     # 本垒打
+      RBI: 1    # 打点
+      SB: 1     # 盗垒
+      AVG: 1    # 打击率
+      # OBP: 1   # 上垒率（如需使用，注释掉AVG）
+    # 投手评分
+    pitchers:
+      W: 1       # 胜场
+      SV: 1      # 救援成功
+      HOLD: 1    # 中继成功
+      ERA: -1    # 自责分率（越低越好）
+      WHIP: -1   # WHIP（越低越好）
+      K_per_9: 1 # 每9局三振数
+
+# 选秀模拟器配置
+draft_simulator:
+  # 默认选秀策略: conservative / balanced / aggressive
+  default_strategy: "balanced"
+  # 是否显示价值股提示
+  show_value_picks: true
+  # ADP文件路径
+  adp_file: "adp.csv"
+
+# 风险模型配置
+risk_model:
+  # 上下限计算方法: z_score / historical_variance
+  method: "z_score"
+  # 风险调整系数（值越大，风险影响越大）
+  adjustment_factor: 0.1
+
+# 日志配置
+logging:
+  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+  # 日志文件路径
+  file: "fantasy_baseball.log"

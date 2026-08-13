@@ -1,0 +1,89 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ===== 虚拟环境 =====
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ===== IDE / 编辑器 =====
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+.zcode/
+.trae/
+
+# ===== 项目运行时产物（不应跟踪）=====
+# 数据库
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# 日志
+*.log
+logs/
+
+# 生成的报告与模拟结果
+reports/
+simulation_results/
+data_quality_report.txt
+
+# 缓存
+data/cache/
+.cache/
+*.cache
+
+# 生成的 CSV（选秀日志、排名输出、ADP 缓存）
+draft_log_*.csv
+fantasy_draft_rankings_*.csv
+adp.csv
+sleeper_recommendations*.csv
+
+# ===== 测试 / 覆盖率 =====
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+*.ipynb
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+desktop.ini

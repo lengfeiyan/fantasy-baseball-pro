@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fantasy-baseball"
+version = "2026.1.0"
+description = "专业级 Fantasy Baseball 分析与选秀模拟系统（离线·配置驱动·多模型融合）"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Fantasy Baseball Pro" }]
+keywords = ["fantasy-baseball", "draft", "simulation", "vorp", "sleeper"]
+
+# 核心依赖（运行主流程必需）
+dependencies = [
+    "pandas>=1.3,<3.0",
+    "numpy>=1.20,<3.0",
+    "PyYAML>=5.4,<7.0",
+]
+
+[project.optional-dependencies]
+# 蒙特卡洛高性能模拟（可选，未安装时自动降级为纯 Python）
+fast = ["numba>=0.55,<0.62"]
+# 在线数据抓取（ADP/Statcast/伤病，可选）
+fetch = ["requests>=2.25,<3.0"]
+# 开发与测试
+dev = [
+    "pytest>=7.0,<9.0",
+    "pytest-cov>=4.0,<7.0",
+]
+
+[project.scripts]
+# 命令行入口：安装后可直接用 fantasy-baseball
+fantasy-baseball = "fantasy_baseball.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"fantasy_baseball" = ["*.yaml", "*.yml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"

@@ -83,3 +83,52 @@ logging:
   level: "INFO"
   # 日志文件路径
   file: "fantasy_baseball.log"
+
+# FA分析配置
+fa_analyzer:
+  # 数据更新频率（小时）
+  update_frequency: 6
+  # 默认推荐数量
+  default_top_n: 10
+  # 数据来源优先级
+  data_sources:
+    - MLB_API
+    - FANGRAPHS
+    - ESPN
+  # 推荐算法参数
+  algorithm:
+    position_weight: 0.3
+    performance_weight: 0.4
+    risk_weight: 0.2
+    opportunity_weight: 0.1
+  # 风险模型配置
+  risk_model:
+    # 风险偏好默认值: conservative / balanced / aggressive
+    default_preference: "balanced"
+    # 伤病影响权重
+    injury_weight: 0.3
+  # 缓存配置
+  cache:
+    # 缓存过期时间（小时）
+    expiry: 24
+    # 缓存目录
+    directory: "data/cache"
+
+# SGP（Standings Gain Points）配置
+# 与 VORP 并行的另一种评分体系，专为 5×5 Roto 联盟设计
+sgp:
+  # SGP 分母：每升一名需要多少统计量（12 队联盟经验值）
+  # 可根据你的联盟规模/历史数据调整
+  denominators:
+    hitters:
+      R: 24.6        # 得分
+      HR: 10.4       # 本垒打
+      RBI: 24.6      # 打点
+      SB: 9.4        # 盗垒
+      AVG: 0.0024    # 打击率
+    pitchers:
+      W: 3.03        # 胜场
+      SV: 9.95       # 救援
+      K: 39.3        # 三振
+      ERA: -0.076    # 自责分率（负值，越低越好）
+      WHIP: -0.015   # WHIP（负值）

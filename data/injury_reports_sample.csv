@@ -1,0 +1,5 @@
+player_id,name,injury_type,severity,start_date,expected_return,status
+1,Mike Trout,Hamstring strain,moderate,2026-03-15,2026-04-01,injured
+3,Shohei Ohtani,Elbow soreness,mild,2026-03-10,2026-03-25,day_to_day
+6,Juan Soto,Ankle sprain,mild,2026-03-12,2026-03-22,day_to_day
+10,Bryce Harper,Thumb injury,severe,2026-03-05,2026-04-15,DL

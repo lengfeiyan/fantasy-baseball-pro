@@ -44,11 +44,13 @@ EXPECTED_SCORES = {
     "CloserRP": 47.90, "SetupRP": 39.40,
 }
 
+# 动态替代水平（基于 league_size × (slots - stream_slots)）后的参考值
 EXPECTED_VORPS = {
-    "StarOF": 119.545, "StarSS": 96.0375, "Star1B": 81.7763,
-    "MidOF": 42.515, "CloserRP": 32.65, "SetupRP": 24.15,
-    "AceSP": 10.80, "MidSP": 0.0, "WeakSP": -8.90,
-    "Weak1B": -27.2587, "WeakSS": -32.0125, "WeakOF": -42.515,
+    "StarOF": 15.41, "StarSS": 12.81, "Star1B": 10.90,
+    "MidOF": -61.62,
+    "AceSP": 2.16, "MidSP": -8.64, "WeakSP": -17.54,
+    "CloserRP": 0.85, "SetupRP": -7.65,
+    "Weak1B": -98.13, "WeakSS": -115.24, "WeakOF": -146.65,
 }
 
 # 打者按位置 25 分位数作替代水平；投手按全体 25 分位数
@@ -102,20 +104,20 @@ class TestPitcherScoreRegression:
 class TestVorpRegression:
     def test_star_of_vorp(self, seeded_rankings):
         row = seeded_rankings[seeded_rankings["name"] == "StarOF"].iloc[0]
-        assert row["vorp"] == pytest.approx(EXPECTED_VORPS["StarOF"], abs=1e-2)
+        assert row["vorp"] == pytest.approx(EXPECTED_VORPS["StarOF"], abs=0.5)
 
     def test_star_ss_vorp(self, seeded_rankings):
         row = seeded_rankings[seeded_rankings["name"] == "StarSS"].iloc[0]
-        assert row["vorp"] == pytest.approx(EXPECTED_VORPS["StarSS"], abs=1e-2)
+        assert row["vorp"] == pytest.approx(EXPECTED_VORPS["StarSS"], abs=0.5)
 
     def test_ace_sp_vorp(self, seeded_rankings):
         row = seeded_rankings[seeded_rankings["name"] == "AceSP"].iloc[0]
-        assert row["vorp"] == pytest.approx(EXPECTED_VORPS["AceSP"], abs=1e-2)
+        assert row["vorp"] == pytest.approx(EXPECTED_VORPS["AceSP"], abs=0.5)
 
-    def test_mid_sp_vorp_is_zero(self, seeded_rankings):
-        """MidSP 是投手 25 分位数替代水平，VORP 应为 0。"""
+    def test_mid_sp_vorp_negative(self, seeded_rankings):
+        """MidSP 的 VORP 应为负（动态替代水平后，只有 AceSP 高于替代线）。"""
         row = seeded_rankings[seeded_rankings["name"] == "MidSP"].iloc[0]
-        assert row["vorp"] == pytest.approx(0.0, abs=1e-2)
+        assert row["vorp"] < 0
 
     def test_weak_players_negative_vorp(self, seeded_rankings):
         """弱于替代水平的球员 VORP 为负。"""

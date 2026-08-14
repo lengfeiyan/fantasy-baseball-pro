@@ -53,6 +53,7 @@ DEFAULTS: Dict[str, Any] = {
         "adp_file": "adp.csv",
     },
     "risk_model": {"method": "z_score", "adjustment_factor": 0.1},
+    "scoring": {"stream_slots": 5},
     "logging": {"level": "INFO", "file": "fantasy_baseball.log"},
     "fa_analyzer": {
         "update_frequency": 6,

@@ -10,7 +10,7 @@ from tkinter import messagebox, ttk
 
 from ...config import get_config, save_config_values
 from ...utils.logger import get_logger
-from ._widgets import action_button, labeled_input, section_frame
+from ._widgets import action_button, labeled_combobox, labeled_input, section_frame
 
 logger = get_logger("gui.config")
 
@@ -39,9 +39,18 @@ def create_tab(parent: tk.Widget, app) -> None:
 
     # 选秀策略
     draft_frame = section_frame(parent, "选秀策略")
-    _, strategy_var = labeled_input(
-        draft_frame, "默认策略", cfg["draft_simulator"]["default_strategy"]
+    _, strategy_var = labeled_combobox(
+        draft_frame, "默认策略",
+        ["balanced", "conservative", "aggressive"],
+        default=cfg["draft_simulator"]["default_strategy"],
     )
+
+    # 阵容槽位
+    roster_frame = section_frame(parent, "阵容槽位")
+    roster_vars = {}
+    for pos, count in cfg["league"]["roster_slots"].items():
+        _, v = labeled_input(roster_frame, pos, str(count), width=5)
+        roster_vars[pos] = v
 
     # 保存按钮
     btn_frame = ttk.Frame(parent)
@@ -59,6 +68,8 @@ def create_tab(parent: tk.Widget, app) -> None:
                 updates[f"league.scoring.hitters.{stat}"] = float(var.get())
             for stat, var in pitcher_vars.items():
                 updates[f"league.scoring.pitchers.{stat}"] = float(var.get())
+            for pos, var in roster_vars.items():
+                updates[f"league.roster_slots.{pos}"] = int(var.get())
 
             save_config_values(updates)
             messagebox.showinfo("成功", "配置已保存（注释已保留）")

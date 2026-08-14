@@ -59,6 +59,8 @@ class FantasyBaseballGUI:
         self.root.title("Fantasy Baseball Pro")
         self.root.geometry("900x650")
         self.root.resizable(True, True)
+        # 启动时最大化窗口
+        self.root.state("zoomed")
 
         # 异步任务消息队列（工作线程 → 主线程）
         self._msg_queue: queue.Queue = queue.Queue()

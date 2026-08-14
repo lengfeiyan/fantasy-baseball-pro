@@ -55,16 +55,30 @@ class SGPModel:
         self._conn = conn
         cfg = get_config()
         sgp_cfg = cfg.get("sgp", {})
-        self.hitter_denoms = {
+        league_size = cfg["league"]["size"]
+        # SGP 分母按联盟规模线性缩放（经验值基于 12 队）
+        # 队伍越多，每个类别总量越大，升一名需要的统计量越多（分母越大）
+        scale = league_size / 12.0
+
+        base_hitter = {
             **DEFAULT_HITTER_DENOMS,
             **sgp_cfg.get("denominators", {}).get("hitters", {}),
         }
-        self.pitcher_denoms = {
+        base_pitcher = {
             **DEFAULT_PITCHER_DENOMS,
             **sgp_cfg.get("denominators", {}).get("pitchers", {}),
         }
+        # 计数统计的分母直接缩放；比率统计的分母（AVG/ERA/WHIP）不缩放（与队伍数无关）
+        self.hitter_denoms = {
+            k: (v * scale if k in ("R", "HR", "RBI", "SB") else v)
+            for k, v in base_hitter.items()
+        }
+        self.pitcher_denoms = {
+            k: (v * scale if k in ("W", "SV", "K") else v)
+            for k, v in base_pitcher.items()
+        }
         # 替代水平：取联盟规模 × 选秀轮数之后的球员
-        self.replacement_cutoff = cfg["league"]["size"] * cfg["league"]["rounds"]
+        self.replacement_cutoff = league_size * cfg["league"]["rounds"]
 
     # -------------------------------------------------------------- 主入口
     def calculate_sgp(self) -> pd.DataFrame:

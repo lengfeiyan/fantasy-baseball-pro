@@ -144,19 +144,20 @@ def _parse_table(html: str, col_map: dict) -> pd.DataFrame:
     # 解析 Player 列 → name/team/pos
     players = raw_df["Player"].apply(lambda x: _parse_player_cell(x or ""))
     raw_df["name"] = [p[0] for p in players]
-    raw_df["team"] = [p[1] for p in players]  # _parse_player_cell 返回 (name, pos, status)
-    # 注意：_parse_player_cell 返回 (name, pos, status)，team 在括号里未单独提取
-    # 这里 pos 取第二个返回值
     raw_df["pos"] = [p[1] for p in players]
 
     # 重新从 Player 列提取 team（括号里的球队缩写）
     raw_df["team"] = raw_df["Player"].apply(_extract_team)
+
+    # 提取所有位置资格（用于多位置灵活性 bonus）
+    raw_df["eligible_pos"] = raw_df["Player"].apply(_extract_all_positions)
 
     # 列名映射 + 数值转换
     result = pd.DataFrame()
     result["name"] = raw_df["name"]
     result["team"] = raw_df["team"]
     result["pos"] = raw_df["pos"]
+    result["eligible_pos"] = raw_df["eligible_pos"]
     for fp_col, internal_col in col_map.items():
         if fp_col == "Player":
             continue
@@ -171,6 +172,40 @@ def _extract_team(player_cell: str) -> str:
     import re
     m = re.search(r"\(([A-Z]{2,4})\s*[-]", player_cell or "")
     return m.group(1) if m else ""
+
+
+def _extract_all_positions(player_cell: str) -> str:
+    """从 Player 列提取所有归一化位置，逗号分隔。
+
+    例："(NYY - LF,CF,RF,DH)" → "OF,UTIL"
+         "(KC - SS)"           → "SS"
+    """
+    import re
+    from ..core.adp import _POSITION_NORMALIZE
+
+    m = re.match(r"^(.*?)\s*\(([^)]*)\)", player_cell or "")
+    if not m:
+        return ""
+    paren = m.group(2).strip()
+    # 去掉球队缩写
+    team_match = re.match(r"^[A-Z]{2,4}\s*[-]\s*(.+)$", paren)
+    if team_match:
+        pos_part = team_match.group(1)
+    elif " - " in paren:
+        pos_part = paren.split(" - ", 1)[1]
+    else:
+        pos_part = paren
+
+    # 解析每个位置并归一化去重
+    positions = []
+    seen = set()
+    for raw_pos in pos_part.split(","):
+        p = raw_pos.strip()
+        normalized = _POSITION_NORMALIZE.get(p, p)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            positions.append(normalized)
+    return ",".join(positions)
 
 
 def _to_float(v):

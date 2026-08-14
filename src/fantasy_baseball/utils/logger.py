@@ -8,15 +8,18 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from typing import Dict
 
-# 项目根 = src/ 的上一层（即仓库根）。本文件位于
-#   <root>/src/fantasy_baseball/utils/logger.py
-# 因此向上回溯 4 层即可。
+# 项目根：打包后用 exe 所在目录；开发环境用 __file__ 反推（向上回溯 4 层）
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", ".."))
+if getattr(sys, "frozen", False):
+    # PyInstaller 打包后：用 exe 所在目录（exe 旁边放 config.yaml/data/ 等运行时文件）
+    PROJECT_ROOT = os.path.dirname(sys.executable)
+else:
+    PROJECT_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", ".."))
 
 LOG_DIR = os.path.join(PROJECT_ROOT, "logs")
 

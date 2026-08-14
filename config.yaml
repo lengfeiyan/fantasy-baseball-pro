@@ -77,6 +77,13 @@ risk_model:
   # 风险调整系数（值越大，风险影响越大）
   adjustment_factor: 0.1
 
+# 替代水平配置
+scoring:
+  # stream 席位数：这些位置的球员本质上是替代水平（日替/stream FA）
+  # 用于动态替代水平计算：固定球员数 = league_size × (total_slots - stream_slots)
+  # 替代水平 = 该位置排名最后的固定球员的评分
+  stream_slots: 5
+
 # 日志配置
 logging:
   # 日志级别: DEBUG, INFO, WARNING, ERROR

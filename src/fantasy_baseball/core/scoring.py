@@ -42,6 +42,47 @@ class ScoringModel:
         self.scoring_rules = cfg["league"]["scoring"]
         self.risk_method = cfg["risk_model"]["method"]
         self.risk_adjustment = cfg["risk_model"]["adjustment_factor"]
+        # 动态替代水平配置
+        self.league_size = cfg["league"]["size"]
+        self.roster_slots = cfg["league"]["roster_slots"]
+        self.total_slots = sum(self.roster_slots.values())
+        # stream 席位：这些位置上的球员本质上就是替代水平球员（日替/stream FA）
+        # 默认 5（SP 轮换 + setup RP + UTIL 等），可在 config.yaml 调整
+        self.stream_slots = cfg.get("scoring", {}).get("stream_slots", 5)
+
+    def _replacement_quantile(self, total_players: int, pos_slots: int = 1) -> float:
+        """计算替代水平对应的分位数。
+
+        基于"该位置被选的固定球员数"算替代水平位置：
+        - 每队该位置的 slot 数 × 联盟队伍数 = 该位置总被选人数
+        - 其中一部分是 stream 席位（替代水平球员），从总被选数中减去
+        - 替代水平 = 固定被选球员中排名最后那个
+
+        Args:
+            total_players: 该位置/分组的球员总数。
+            pos_slots: 该位置每队的 roster slot 数（如 OF=4, SS=1）。
+
+        Returns:
+            分位数（0-1），用于 quantile()。
+        """
+        if total_players <= 0:
+            return 0.25  # 兜底
+
+        # 该位置被选的总人数（每队 pos_slots 个 × 队伍数）
+        drafted = self.league_size * pos_slots
+
+        # stream 席位按各位置 slot 占比分摊
+        if self.total_slots > 0:
+            stream_this_pos = self.stream_slots * pos_slots / self.total_slots
+        else:
+            stream_this_pos = 0
+
+        # 固定球员数 = 被选数 - stream 分摊
+        fixed = max(1, drafted - stream_this_pos)
+
+        # 分位数 = 固定球员数 / 总球员数
+        q = fixed / total_players
+        return max(0.10, min(0.90, q))
 
     # ------------------------------------------------------------------ VORP
     def calculate_vorp(self) -> pd.DataFrame:
@@ -74,26 +115,60 @@ class ScoringModel:
         return all_df
 
     def _calculate_hitter_vorp(self, df: pd.DataFrame) -> pd.DataFrame:
-        """计算打者 VORP（按位置 25 分位数为替代水平）。"""
+        """计算打者 VORP（按位置动态替代水平 + 多位置灵活性 bonus）。"""
         df["score"] = self._compute_score(df, self.scoring_rules["hitters"])
 
         replacement_levels = {}
         for pos in df["pos"].dropna().unique():
             pos_scores = df.loc[df["pos"] == pos, "score"]
             if len(pos_scores) > 0:
-                replacement_levels[pos] = pos_scores.quantile(0.25)
+                pos_slots = self.roster_slots.get(pos, 1)
+                q = self._replacement_quantile(len(pos_scores), pos_slots)
+                replacement_levels[pos] = pos_scores.quantile(q)
 
-        df["vorp"] = df.apply(
-            lambda row: row["score"] - replacement_levels.get(row["pos"], 0), axis=1
-        )
+        def _calc_vorp(row):
+            score = row["score"]
+            primary_pos = row.get("pos", "")
+            # 多位置资格：取所有合格位置中替代水平最低的（即 VORP 最高的位置）
+            eligible = row.get("eligible_pos", "")
+            if eligible and isinstance(eligible, str) and "," in eligible:
+                best_vorp = None
+                for p in eligible.split(","):
+                    p = p.strip()
+                    repl = replacement_levels.get(p, replacement_levels.get(primary_pos, 0))
+                    v = score - repl
+                    if best_vorp is None or v > best_vorp:
+                        best_vorp = v
+                vorp = best_vorp if best_vorp is not None else score - replacement_levels.get(primary_pos, 0)
+            else:
+                vorp = score - replacement_levels.get(primary_pos, 0)
+            return vorp
+
+        df["vorp"] = df.apply(_calc_vorp, axis=1)
         df["player_type"] = "hitter"
         return df
 
     def _calculate_pitcher_vorp(self, df: pd.DataFrame) -> pd.DataFrame:
-        """计算投手 VORP（全体 25 分位数为替代水平）。"""
+        """计算投手 VORP（SP/RP 分别按动态替代水平）。"""
         df["score"] = self._compute_score(df, self.scoring_rules["pitchers"])
-        replacement = df["score"].quantile(0.25)
-        df["vorp"] = df["score"] - replacement
+
+        # 按 SP/RP 分组算替代水平
+        replacements = {}
+        for pos in ("SP", "RP"):
+            pos_scores = df.loc[df["pos"] == pos, "score"]
+            if len(pos_scores) > 0:
+                pos_slots = self.roster_slots.get(pos, 1)
+                q = self._replacement_quantile(len(pos_scores), pos_slots)
+                replacements[pos] = pos_scores.quantile(q)
+        # 兜底：无位置信息的用全体替代水平
+        total_pitcher_slots = self.roster_slots.get("SP", 4) + self.roster_slots.get("RP", 3)
+        overall_q = self._replacement_quantile(len(df), total_pitcher_slots)
+        overall = df["score"].quantile(overall_q)
+
+        df["vorp"] = df.apply(
+            lambda row: row["score"] - replacements.get(row.get("pos"), overall),
+            axis=1,
+        )
         df["player_type"] = "pitcher"
         return df
 

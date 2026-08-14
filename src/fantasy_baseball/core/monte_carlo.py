@@ -270,18 +270,23 @@ def _simulate_pure(adp_sorted, iterations, total_picks, league_size):
 class DraftEngine:
     """蒙特卡洛选秀引擎。"""
 
-    def __init__(self, player_pool: Optional[pd.DataFrame] = None):
+    def __init__(self, player_pool: Optional[pd.DataFrame] = None, method: str = "vorp"):
         cfg = get_config()
         self.league_config = cfg["league"]
         self.league_size = self.league_config["size"]
         self.rounds = self.league_config["rounds"]
+        self.method = method
         # 标准化列名
         self.players = self._prepare_pool(player_pool)
         self.drafters: Dict[int, BaseDrafter] = {}
 
     def _prepare_pool(self, pool: Optional[pd.DataFrame]) -> pd.DataFrame:
         if pool is None:
-            pool = ScoringModel().calculate_vorp()
+            if self.method == "sgp":
+                from .sgp import SGPModel
+                pool = SGPModel().calculate_sgp()
+            else:
+                pool = ScoringModel().calculate_vorp()
         df = pool.copy()
         # 统一列名
         if "position" in df.columns and "pos" not in df.columns:
@@ -290,11 +295,12 @@ class DraftEngine:
             df = df.rename(columns={"player_name": "name"})
         if "fantasy_points" in df.columns and "vorp" not in df.columns:
             df = df.rename(columns={"fantasy_points": "vorp"})
-        # 缺 adp 列或全是默认值 999 → 用 VORP 排名反推估算 ADP
+        # 确定排序基准列：SGP 模式优先用 sgp_total，否则用 vorp
+        rank_col = "sgp_total" if (self.method == "sgp" and "sgp_total" in df.columns) else "vorp"
+        # 缺 adp 列或全是默认值 999 → 用排名反推估算 ADP
         if "adp" not in df.columns or df["adp"].fillna(999).max() == 999:
-            # VORP 越高 → 估算 ADP 越低（越早被选）
-            vorp_rank = df["vorp"].fillna(0).rank(method="first", ascending=False)
-            df["adp"] = vorp_rank.astype(float)
+            value_rank = df[rank_col].fillna(0).rank(method="first", ascending=False)
+            df["adp"] = value_rank.astype(float)
         return df
 
     def simulate_draft(

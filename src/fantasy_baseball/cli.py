@@ -142,7 +142,7 @@ def _cmd_adp(args) -> int:
 def _cmd_draft(args) -> int:
     from .core import SnakeDraftSimulator
 
-    path = SnakeDraftSimulator().simulate_and_save(
+    path = SnakeDraftSimulator(method=getattr(args, "method", "vorp")).simulate_and_save(
         user_pick=args.pick, strategy=args.strategy
     )
     print(f"[完成] 选秀日志：{path}")
@@ -354,6 +354,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--strategy", default="balanced",
         choices=["balanced", "conservative", "aggressive"],
     )
+    p.add_argument("--method", default="vorp", choices=["vorp", "sgp"],
+                   help="评分方法：vorp（默认）或 sgp")
     p.set_defaults(func=_cmd_draft)
 
     # simulate

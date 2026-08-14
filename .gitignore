@@ -68,6 +68,11 @@ fantasy_draft_rankings_*.csv
 adp.csv
 sleeper_recommendations*.csv
 
+# ===== 打包产物 =====
+build/
+dist/
+*.spec.bak
+
 # ===== 测试 / 覆盖率 =====
 .pytest_cache/
 .coverage

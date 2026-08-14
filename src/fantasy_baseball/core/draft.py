@@ -78,7 +78,7 @@ class SnakeDraftSimulator:
             )
             for pick_num, team_id in enumerate(order, 1):
                 total_pick = (round_num - 1) * self.league_size + pick_num
-                player = self._select_player(team_id, strategy)
+                player = self._select_player(team_id, strategy, user_pick)
                 if player is None:
                     continue
                 self.drafted_players.add(player["name"])
@@ -119,15 +119,14 @@ class SnakeDraftSimulator:
         return path
 
     # -------------------------------------------------------------- 内部
-    def _select_player(self, team_id: int, strategy: str) -> Optional[Dict]:
-        """为球队选择最佳球员，考虑位置需求与稀缺性。"""
+    def _select_player(self, team_id: int, strategy: str, user_pick: int = 0) -> Optional[Dict]:
+        """为球队选择最佳球员，考虑位置需求、稀缺性与类别平衡。"""
         available = self.rankings[~self.rankings["name"].isin(self.drafted_players)]
         if available.empty:
             return None
 
         # 按策略排序
         if self.method == "sgp":
-            # SGP 没有 upside/floor，所有策略都用 sgp_total
             sort_col = "sgp_total" if "sgp_total" in available.columns else "vorp"
         else:
             sort_col = {"aggressive": "vorp_upside", "conservative": "vorp_floor"}.get(strategy, "vorp")
@@ -135,6 +134,12 @@ class SnakeDraftSimulator:
         available = available.sort_values(sort_col, ascending=False)
 
         pos_counts = self._team_pos_counts(team_id)
+        # 类别平衡：仅对用户球队生效，跟踪已选球员的 5×5 类别
+        is_user = (team_id == user_pick)
+        cat_totals = self._team_category_totals(team_id) if is_user else None
+        HITTER_STATS = ("HR", "SB", "R", "RBI")
+        PITCHER_STATS = ("W", "SV", "K")
+
         best, best_score = None, -float("inf")
         for _, player in available.iterrows():
             pos = player.get("pos")
@@ -145,10 +150,64 @@ class SnakeDraftSimulator:
             # 稀缺位置 10% 加成
             if pos_counts.get(pos, 0) < self.roster_slots.get(pos, 0):
                 score *= 1.1
+            # 类别平衡 bonus（仅用户球队）：如果该球员补的是弱势类别，加分
+            if is_user and cat_totals:
+                balance_bonus = self._category_balance_bonus(player, cat_totals, HITTER_STATS, PITCHER_STATS)
+                score += balance_bonus
             if score > best_score:
                 best_score, best = score, player.to_dict()
 
         return best if best is not None else (available.iloc[0].to_dict() if not available.empty else None)
+
+    def _team_category_totals(self, team_id: int) -> Dict[str, float]:
+        """统计用户已选球员的 5×5 类别累计。"""
+        totals: Dict[str, float] = {}
+        stats = ("HR", "SB", "R", "RBI", "AVG", "W", "SV", "K", "ERA", "WHIP")
+        for s in stats:
+            totals[s] = 0.0
+        for p in self.team_rosters[team_id]["roster"].values():
+            for s in stats:
+                val = p.get(s)
+                if val is not None:
+                    try:
+                        totals[s] += float(val)
+                    except (ValueError, TypeError):
+                        pass
+        return totals
+
+    def _category_balance_bonus(
+        self, player: pd.Series, cat_totals: Dict[str, float],
+        hitter_stats: tuple, pitcher_stats: tuple,
+    ) -> float:
+        """计算类别平衡 bonus。
+
+        逻辑：找出阵容里最弱的类别（累计值最低），如果该球员在弱类上有高预测值，
+        给一个 bonus。bonus 量级约为 sort_col 的 10-15%，避免压过主排序。
+        """
+        pos = player.get("pos", "")
+        bonus = 0.0
+
+        # 打者：看 HR/SB/R/RBI 是否偏科
+        if pos not in ("SP", "RP"):
+            cat_values = []
+            for s in hitter_stats:
+                val = player.get(s)
+                if val is not None:
+                    try:
+                        cat_values.append((s, float(val)))
+                    except (ValueError, TypeError):
+                        pass
+            if cat_values and len(cat_values) >= 2:
+                # 找阵容最弱的类别
+                weakest = min(cat_totals.get(s, 0) for s, _ in cat_values)
+                strongest = max(cat_totals.get(s, 0) for s, _ in cat_values)
+                if strongest > 0 and weakest < strongest * 0.5:
+                    # 阵容偏科：给在弱类上有贡献的球员 bonus
+                    for s, val in cat_values:
+                        if cat_totals.get(s, 0) == weakest and val > 0:
+                            bonus += val * 0.02  # 轻量 bonus
+
+        return min(bonus, 15.0)  # 上限 15 分，避免压过 VORP
 
     def _team_pos_counts(self, team_id: int) -> Dict[str, int]:
         counts = {pos: 0 for pos in self.roster_slots}

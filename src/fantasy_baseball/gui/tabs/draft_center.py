@@ -75,9 +75,10 @@ def create_tab(parent: tk.Widget, app) -> None:
 
     def do_monte_carlo():
         def _work():
-            app.post("运行蒙特卡洛模拟（可能需数秒）...")
+            method = method_var.get()
+            app.post(f"运行蒙特卡洛模拟（{method.upper()}，可能需数秒）...")
             target = int(mc_pick_var.get())
-            engine = DraftEngine()
+            engine = DraftEngine(method=method)
             avail = engine.analyze_availability(target_pick=target)
             threshold = float(min_avail_var.get())
             top = avail[avail["availability_prob"] >= threshold].head(15)

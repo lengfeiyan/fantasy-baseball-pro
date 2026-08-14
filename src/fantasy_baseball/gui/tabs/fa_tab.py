@@ -67,15 +67,31 @@ def create_tab(parent: tk.Widget, app) -> None:
             if not result:
                 return "未生成推荐，请先更新 FA 池。"
 
-            # 检查阵容是否设置
+            # 检查阵容是否设置 + 显示缺口
             from ...db import RosterRepository, db_session
+            from ...config import get_config
             with db_session() as conn:
-                roster_count = RosterRepository(conn).count()
+                repo = RosterRepository(conn)
+                roster_count = repo.count()
+                roster_df = repo.get_roster()
 
             lines = [f"FA 推荐（{risk_var.get()}策略，Top {len(result)}）：\n", "-" * 60 + "\n"]
             if roster_count == 0:
                 lines.append("[提示] 阵容未设置，推荐基于空阵容（所有位置都缺）。\n")
                 lines.append("去「阵容验证」选项卡导入阵容后，推荐会优先填补缺口位置。\n")
+            else:
+                # 显示阵容缺口
+                slots = get_config()["league"]["roster_slots"]
+                pos_counts = roster_df["pos"].value_counts().to_dict() if "pos" in roster_df.columns else {}
+                missing = []
+                for pos, required in slots.items():
+                    cur = pos_counts.get(pos, 0)
+                    if cur < required:
+                        missing.append(f"{pos}({cur}/{required})")
+                if missing:
+                    lines.append(f"[阵容缺口] 需补: {', '.join(missing)}\n")
+                else:
+                    lines.append("[阵容已满] 按综合价值排序推荐\n")
 
             for i, r in enumerate(result, 1):
                 lines.append(

@@ -16,6 +16,7 @@ from tkinter import messagebox, ttk
 from typing import Any, Callable, Optional
 
 from ..utils.logger import get_logger
+from .errors import friendly_error
 from .tabs import (
     analysis,
     config_tab,
@@ -171,7 +172,7 @@ class FantasyBaseballGUI:
                             cb(payload)
                         except Exception as e:
                             logger.error("on_done 回调失败: %s", e)
-                            messagebox.showerror("错误", str(e))
+                            messagebox.showerror("错误", friendly_error(e))
                 elif kind == "cancelled":
                     self._enable_progress(False)
                     self.set_status("已取消")
@@ -181,7 +182,7 @@ class FantasyBaseballGUI:
                     if cb:
                         cb(payload)
                     else:
-                        messagebox.showerror("错误", str(payload))
+                        messagebox.showerror("错误", friendly_error(payload))
         except queue.Empty:
             pass
         self.root.after(100, self._poll_queue)

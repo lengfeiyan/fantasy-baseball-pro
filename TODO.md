@@ -1,7 +1,7 @@
 # 待办事项（TODO）
 
 > 最后更新：2026-08-17
-> 当前版本：2026.1.0 | 测试：138 passed | 已打包 Windows exe
+> 当前版本：2026.1.0 | 测试：145 passed | 已打包 Windows exe
 
 ---
 
@@ -85,7 +85,7 @@
 ## 🟢 低严重度（2026-08-14）
 
 - ✅ **L1** 选秀模拟重复执行两遍（已修复：simulate_and_save 支持传入 log_df）
-- **L2** 错误信息中英混杂（中文按钮弹英文异常）
+- ✅ **L2** 错误信息中英混杂（已修复：gui/errors.py friendly_error 统一翻译常见异常，4 个弹窗点接入）
 - ✅ **L3** `_safe_float` 把负数解析成正数（已修复：保留负号，只剔除 "-/-.---/---" 占位符，新增回归测试）
 - ✅ **L4** SGP 选秀日志 vorp 全 0（已修复：SGP 时 vorp 列回填 sgp_total；强度分析自动识别）
 - ✅ **L5** 文档细节出入（已随 M7 同步修复）
@@ -140,6 +140,7 @@
 以下在本次开发中已实现，记录在此供追溯：
 
 ### 2026-08-17 完成（第三波修复：剩余审计项）
+- [x] L2 错误信息中文化（gui/errors.py friendly_error：常见网络/文件/数值异常→中文说明，附原始详情）
 - [x] M5 Sleeper Statcast 走真实 API（无文件时 search_player + StatcastFetcher，带缓存）
 - [x] M6 配置 GUI 补全：价值股标记、stream 席位数、风险调整系数、SGP 分母
 - [x] M8 输出统一到 output/（config.output_path/find_output_file，读端兼容旧路径）

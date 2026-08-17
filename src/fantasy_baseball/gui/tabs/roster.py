@@ -11,6 +11,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from ...config import get_config
+from ..errors import friendly_error
 from ...core import RosterValidator
 from ...db import RosterRepository, db_session
 from ._widgets import (
@@ -136,7 +137,7 @@ def create_tab(parent: tk.Widget, app) -> None:
             messagebox.showinfo("成功", f"已导入 {n} 名球员")
 
         def _error(e):
-            messagebox.showerror("错误", str(e))
+            messagebox.showerror("错误", friendly_error(e))
 
         app.run_async(_work, on_done=_done, on_error=_error, status="导入阵容...")
 

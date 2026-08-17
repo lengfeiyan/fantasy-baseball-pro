@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from ...fa import FAAnalyzer, RealTimeData, RecommendationSystem
+from ..errors import friendly_error
 from ._widgets import (
     action_button,
     labeled_combobox,
@@ -174,7 +175,7 @@ def _import_fa_csv(app, output):
         messagebox.showinfo("成功", f"导入 {n} 名 FA 球员")
 
     def _error(e):
-        messagebox.showerror("错误", str(e))
+        messagebox.showerror("错误", friendly_error(e))
 
     app.run_async(_work, on_done=_done, on_error=_error, status="导入FA池...")
 

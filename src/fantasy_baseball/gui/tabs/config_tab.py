@@ -12,6 +12,7 @@ from tkinter import messagebox, ttk
 
 from ...config import get_config, save_config_values
 from ...utils.logger import get_logger
+from ..errors import friendly_error
 from ._widgets import action_button, labeled_combobox, labeled_input, section_frame
 
 logger = get_logger("gui.config")
@@ -116,6 +117,6 @@ def create_tab(parent: tk.Widget, app) -> None:
             messagebox.showinfo("成功", "配置已保存（注释已保留）")
             app.set_status("配置已保存")
         except Exception as e:
-            messagebox.showerror("错误", str(e))
+            messagebox.showerror("错误", friendly_error(e))
 
     action_button(btn_frame, "保存配置", save)

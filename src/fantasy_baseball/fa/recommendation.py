@@ -64,8 +64,9 @@ class RecommendationSystem:
         position: Optional[str] = None,
         top_n: int = 10,
         risk_preference: str = "balanced",
+        cancel_check=None,
     ) -> List[Dict[str, Any]]:
-        """生成 FA 推荐。"""
+        """生成 FA 推荐。cancel_check 为可选取消回调（评估每个球员前检查）。"""
         logger.info("生成推荐：位置=%s, top=%d, 风险=%s", position, top_n, risk_preference)
         needs = self.analyze_roster_needs(user_roster)
         fa_pool = self.fa_analyzer.get_fa_pool(position)
@@ -75,6 +76,10 @@ class RecommendationSystem:
 
         evaluations = []
         for player in fa_pool:
+            # 支持中途取消
+            if cancel_check is not None and cancel_check():
+                logger.info("FA 推荐被取消")
+                return []
             try:
                 ev = self._evaluate_player(player, needs, risk_preference)
                 if ev:
@@ -89,15 +94,31 @@ class RecommendationSystem:
         self, player: Dict[str, Any], needs: Dict[str, float], risk_preference: str
     ) -> Optional[Dict[str, Any]]:
         pid = player.get("player_id")
-        if pid is None:
-            return None
-        value = self.fa_analyzer.calculate_fa_value(pid)
+        # 修复 H4：player_id 为空（None 或 NaN）时，用姓名搜索 MLB id 兜底。
+        # 否则文档说"player_id 可留空"但推荐系统静默丢弃这些球员。
+        import pandas as pd
+        if pid is None or (isinstance(pid, float) and pd.isna(pid)):
+            name = player.get("name")
+            if not name:
+                return None
+            try:
+                from ..data_fetch.mlb_api import MLBStatsClient
+                person = MLBStatsClient().search_player(name)
+                if not person:
+                    logger.info("无法从姓名解析 MLB id，跳过: %s", name)
+                    return None
+                pid = person["id"]
+            except Exception as e:
+                logger.warning("按姓名搜索 MLB id 失败 (%s): %s", name, e)
+                return None
+
+        value = self.fa_analyzer.calculate_fa_value(int(pid))
         pos = player.get("pos")
         need_factor = needs.get(pos, 0.5)
-        risk_adj = self._calculate_risk_adjustment(pid, risk_preference)
+        risk_adj = self._calculate_risk_adjustment(int(pid), risk_preference)
         final_score = value["overall_value"] * (1 + need_factor * 0.5) * risk_adj
         return {
-            "player_id": pid,
+            "player_id": int(pid),
             "name": player.get("name"),
             "team": player.get("team"),
             "pos": pos,
@@ -144,6 +165,9 @@ class RecommendationSystem:
             rows.append(row)
         df = pd.DataFrame(rows)
         path = resolve_path(output_file)
+        # 确保输出目录存在（reports/ 等目录首次运行时不存在）
+        import os
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         df.to_csv(path, index=False)
         logger.info("推荐已导出: %s", path)
         return path

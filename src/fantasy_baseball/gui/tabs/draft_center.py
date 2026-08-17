@@ -84,11 +84,14 @@ def create_tab(parent: tk.Widget, app) -> None:
             top = avail[avail["availability_prob"] >= threshold].head(15)
             if top.empty:
                 return f"在可用率 >= {threshold} 时无目标球员，尝试降低阈值。"
+            # 价值列随评分方法变化（SGP 用 sgp_total）
+            value_col = "sgp_total" if method == "sgp" else "vorp"
+            value_label = "SGP" if method == "sgp" else "VORP"
             lines = [f"第{target}顺位高可用目标（可用率 >= {threshold}）：\n", "-" * 60 + "\n"]
             for _, r in top.iterrows():
                 lines.append(
                     f"{r['name']:<25} 可用率={r['availability_prob']*100:5.1f}%  "
-                    f"VORP={r['vorp']:6.1f}  ADP={r['adp']}"
+                    f"{value_label}={r[value_col]:6.1f}  ADP={r['adp']}"
                 )
             return "\n".join(lines)
 

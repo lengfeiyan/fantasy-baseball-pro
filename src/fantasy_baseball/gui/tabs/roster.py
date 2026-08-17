@@ -84,6 +84,8 @@ def create_tab(parent: tk.Widget, app) -> None:
         ),
         justify=tk.LEFT,
     ).pack(anchor=tk.W, pady=2)
+    # 顺位输入（修复 M1：之前硬编码第 5 顺位）
+    _, pick_var = labeled_input(roster_frame, "你的顺位", "5", width=5)
 
     btn_roster_frame = ttk.Frame(roster_frame)
     btn_roster_frame.pack(pady=4)
@@ -106,9 +108,8 @@ def create_tab(parent: tk.Widget, app) -> None:
             import pandas as pd
             df = pd.read_csv(path)
 
-            # 尝试提取用户阵容（draft log 有 team 列时取 team==用户顺位；否则全部）
-            cfg = get_config()
-            user_pick = 5  # 默认第5顺位
+            # 尝试提取用户阵容（draft log 有 is_user_pick 列时优先用之；否则按顺位）
+            user_pick = int(pick_var.get())
             if "team" in df.columns and "is_user_pick" in df.columns:
                 user_df = df[df["is_user_pick"] == True]
             elif "team" in df.columns:

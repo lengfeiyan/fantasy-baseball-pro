@@ -210,8 +210,12 @@ class FAAnalyzer:
                 + sc.get("swing_contact_rate", 0) * 100
             )
         elif pos in PITCHER_POSITIONS:
+            # 修复 H9：statcast.py 存的键是小写 "xera"，此处原来读 "xERA"（大写）
+            # 恒取默认值 5，导致所有投手被无差别扣 (3-5)*20 = -40 分。
+            # 兼容两种大小写，避免其他数据源用大写。
+            xera = sc.get("xera", sc.get("xERA", 5))
             score = (
-                (3 - sc.get("xERA", 5)) * 20
+                (3 - xera) * 20
                 + sc.get("whiff_rate", 0) * 100
                 + sc.get("spin_rate", 0) * 0.1
                 + sc.get("velocity", 0) * 2

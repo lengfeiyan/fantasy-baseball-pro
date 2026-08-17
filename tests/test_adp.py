@@ -106,18 +106,12 @@ def test_offline_returns_mock(tmpdir, monkeypatch):
     assert "adp" in df.columns
 
 
-def test_cache_read_after_write(tmpdir):
-    """抓取后写入缓存，后续读取应命中缓存。"""
+def test_mock_does_not_write_cache(tmpdir):
+    """修复 H3：mock 数据不写盘，避免污染真实缓存。"""
     adp_file = str(tmpdir.join("adp.csv"))
     cache = ADPCache(adp_file=adp_file)
-    # 第一次：离线用 mock 并写缓存
-    df1 = cache.fetch_adp(allow_network=False)
-    assert os.path.exists(adp_file)
-
-    # 第二次：新实例读缓存（应命中，不走 mock 抓取逻辑）
-    cache2 = ADPCache(adp_file=adp_file)
-    df2 = cache2.fetch_adp(allow_network=False)
-    assert len(df2) == len(df1)
+    cache.fetch_adp(allow_network=False)
+    assert not os.path.exists(adp_file), "mock ADP 不应写入缓存文件"
 
 
 def test_get_player_adp_found(tmpdir):
@@ -144,14 +138,16 @@ def test_get_player_adp_case_insensitive(tmpdir):
     assert cache.get_player_adp("mike trout", allow_network=False) is not None
 
 
-def test_force_refresh_ignores_cache(tmpdir):
-    """force=True 应忽略缓存重新获取。"""
+def test_force_refresh_does_not_overwrite_with_mock(tmpdir):
+    """修复 H3：force=True 且离线时，mock 不应覆盖已有真实缓存。"""
     adp_file = str(tmpdir.join("adp.csv"))
     cache = ADPCache(adp_file=adp_file)
-    # 先写缓存
-    cache.fetch_adp(allow_network=False)
+    # 先模拟已有真实缓存（手动写入）
+    import pandas as pd
+    real_df = pd.DataFrame({"name": ["Real Player"], "pos": ["OF"], "adp": [1.5]})
+    real_df.to_csv(adp_file, index=False)
     mtime_before = os.path.getmtime(adp_file)
-    # force 刷新（仍离线，走 mock）
+
+    # force 刷新（离线，走 mock）——不应覆盖真实缓存
     cache.fetch_adp(force=True, allow_network=False)
-    # 缓存被重写
-    assert os.path.getmtime(adp_file) >= mtime_before
+    assert os.path.getmtime(adp_file) == mtime_before, "mock 不应覆盖已有缓存文件"

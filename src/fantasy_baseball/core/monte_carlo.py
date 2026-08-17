@@ -209,7 +209,8 @@ def get_drafter(strategy: str, league_config: Dict) -> BaseDrafter:
 
 
 # ---------------------------------------------------------------- njit 核心
-def _simulate_core(adp_sorted, iterations, total_picks, n_rounds, league_size):
+def _simulate_core(adp_sorted, iterations, total_picks, n_rounds, league_size,
+                   cancel_check=None):
     """模拟核心。numba 可用时用 njit 加速，否则纯 Python。
 
     模拟逻辑：每轮给 ADP 排序后的球员加随机噪声，按噪声值升序"被选"。
@@ -220,7 +221,7 @@ def _simulate_core(adp_sorted, iterations, total_picks, n_rounds, league_size):
             return _simulate_numba(adp_sorted, iterations, total_picks, league_size)
         except Exception:
             pass
-    return _simulate_pure(adp_sorted, iterations, total_picks, league_size)
+    return _simulate_pure(adp_sorted, iterations, total_picks, league_size, cancel_check)
 
 
 if _HAS_NUMBA:
@@ -247,8 +248,8 @@ if _HAS_NUMBA:
         _simulate_numba = None
 
 
-def _simulate_pure(adp_sorted, iterations, total_picks, league_size):
-    """纯 Python 降级版。"""
+def _simulate_pure(adp_sorted, iterations, total_picks, league_size, cancel_check=None):
+    """纯 Python 降级版。cancel_check 为可选的取消回调（每 50 次迭代检查）。"""
     n = len(adp_sorted)
     draft_counts = np.zeros(n, dtype=np.int64)
     pick_sums = np.zeros(n, dtype=np.float64)
@@ -256,6 +257,9 @@ def _simulate_pure(adp_sorted, iterations, total_picks, league_size):
     rng = np.random.default_rng()
 
     for it in range(iterations):
+        # 支持中途取消（numba 路径无法中断，纯 Python 路径可以）
+        if cancel_check is not None and it % 50 == 0 and cancel_check():
+            return None, None  # 标记取消
         noisy = adp_sorted + rng.normal(0, 8.0, n)
         order = np.argsort(noisy)
         for pick_num in range(picks_this):
@@ -304,7 +308,8 @@ class DraftEngine:
         return df
 
     def simulate_draft(
-        self, iterations: int = 1000, user_strategy: str = "balanced"
+        self, iterations: int = 1000, user_strategy: str = "balanced",
+        cancel_check=None,
     ) -> pd.DataFrame:
         """运行多次模拟，返回每个球员的可用性统计。
 
@@ -315,6 +320,8 @@ class DraftEngine:
             iterations: 模拟次数。
             user_strategy: 用户策略名（保留接口兼容，加速模式下按 ADP
                            加噪声模拟，与 AI 策略结果近似）。
+            cancel_check: 可选取消回调（纯 Python 路径每 50 次迭代检查）。
+                          返回 True 表示取消。取消时返回空 DataFrame。
 
         Returns:
             DataFrame 含 name/pos/vorp/adp/draft_rate/avg_round/avg_pick。
@@ -339,7 +346,13 @@ class DraftEngine:
         # 运行加速核心
         draft_counts, pick_sums = _simulate_core(
             adp_sorted, iterations, total_picks, self.rounds, self.league_size,
+            cancel_check=cancel_check,
         )
+        # 取消：返回空 DataFrame
+        if draft_counts is None:
+            logger.info("蒙特卡洛模拟被取消")
+            return pd.DataFrame(columns=["name", "pos", "vorp", "adp",
+                                         "times_drafted", "draft_rate", "avg_pick", "avg_round"])
 
         # 聚合结果（映射回原始球员顺序）
         counts_orig = np.zeros(n_players, dtype=np.int64)
@@ -390,7 +403,9 @@ class DraftEngine:
         df = self.players.copy()
         probs = calculate_availability(df["adp"].values, target_pick)
         df["availability_prob"] = probs
-        return df[["name", "pos", "vorp", "adp", "availability_prob"]].sort_values(
+        # 按评分方法返回对应的价值列（SGP 池无 vorp 列）
+        value_col = "sgp_total" if self.method == "sgp" and "sgp_total" in df.columns else "vorp"
+        return df[["name", "pos", value_col, "adp", "availability_prob"]].sort_values(
             "availability_prob", ascending=False
         )
 

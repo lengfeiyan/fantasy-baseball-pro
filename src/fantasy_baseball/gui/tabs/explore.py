@@ -24,7 +24,9 @@ def create_tab(parent: tk.Widget, app) -> None:
     # ===== 上半：球员数据查询 =====
     query_frame = section_frame(parent, "球员数据查询（MLB Stats API + Baseball Savant）")
     _, name_var = labeled_input(query_frame, "球员姓名", "Shohei Ohtani", width=25)
-    _, season_var = labeled_input(query_frame, "赛季", "2025", width=8)
+    # 修复 M10：默认当前年（修复前硬编码 2025）
+    import datetime
+    _, season_var = labeled_input(query_frame, "赛季", str(datetime.datetime.now().year), width=8)
 
     # ===== 下半：伤病列表 =====
     injury_frame = section_frame(parent, "伤病报告")

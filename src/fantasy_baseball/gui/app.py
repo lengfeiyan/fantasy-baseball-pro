@@ -126,7 +126,11 @@ class FantasyBaseballGUI:
         def worker():
             try:
                 result = func()
-                self._msg_queue.put(("done", result, on_done))
+                # 修复 M4：任务完成时若已被取消，丢弃结果（不执行 on_done）
+                if self._cancel_event is not None and self._cancel_event.is_set():
+                    self._msg_queue.put(("cancelled", None, None))
+                else:
+                    self._msg_queue.put(("done", result, on_done))
             except TaskCancelled:
                 self._msg_queue.put(("cancelled", None, None))
             except BaseException as e:  # noqa: BLE001

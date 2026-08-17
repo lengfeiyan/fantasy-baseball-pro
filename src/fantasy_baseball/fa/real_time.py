@@ -156,13 +156,15 @@ class RealTimeData:
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
 
+        # 修复 M3：网络失败要抛异常（让 GUI 显示错误），0 条则正常返回空列表
         try:
             injuries = self._mlb.fetch_injuries(start_date, end_date)
-            if not injuries:
-                logger.info("未抓取到伤病数据，保留现有")
-                return []
         except Exception as e:
-            logger.warning("伤病抓取失败: %s", e)
+            logger.error("伤病抓取失败: %s", e)
+            raise RuntimeError(f"伤病数据抓取失败（网络不可用？）: {e}") from e
+
+        if not injuries:
+            logger.info("未抓取到伤病数据（该时段可能无伤病动态）")
             return []
 
         def _do(conn):

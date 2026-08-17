@@ -293,9 +293,10 @@ class ADPCache:
         # 3. mock 降级
         logger.info("使用内置 mock ADP 数据（%d 条）", len(_MOCK_ADP))
         self._df = pd.DataFrame(_MOCK_ADP)
-        # mock 数据也写入缓存，便于离线下次直接读取
-        if force or not os.path.exists(self.adp_file):
-            self._save_cache(self._df)
+        # 修复 H3：mock 数据**永不写盘**（只驻留内存）。
+        # 避免首次离线运行写入 mock 后，恢复联网的 12 小时 TTL 内仍读到 mock，
+        # 也避免 force 刷新时用 mock 覆盖已有真实数据。
+        # 代价：每次离线启动都重新构造 mock（25 条，成本可忽略）。
         return self._df
 
     def _cache_valid(self) -> bool:

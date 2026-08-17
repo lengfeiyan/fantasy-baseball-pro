@@ -62,9 +62,13 @@ def create_tab(parent: tk.Widget, app) -> None:
             rec = RecommendationSystem(analyzer)
             position = None if pos_var.get() == "All" else pos_var.get()
             result = rec.generate_recommendations(
-                position=position, top_n=int(top_var.get()), risk_preference=risk_var.get()
+                position=position, top_n=int(top_var.get()), risk_preference=risk_var.get(),
+                cancel_check=app.is_cancelled,
             )
             if not result:
+                if app.is_cancelled():
+                    from ..app import TaskCancelled
+                    raise TaskCancelled()
                 return "未生成推荐，请先更新 FA 池。"
 
             # 检查阵容是否设置 + 显示缺口
@@ -132,8 +136,10 @@ def _update(app, output, kind):
         if kind == "fa":
             rtd.update_fa_pool()
             return "FA 池已更新（内置示例数据）"
-        rtd.update_injury_data()
-        return "伤病数据已更新"
+        injuries = rtd.update_injury_data()
+        if not injuries:
+            return "该时段无伤病动态（0 条），数据库保留原有数据"
+        return f"伤病数据已更新（{len(injuries)} 条）"
 
     app.run_async(_work, on_done=lambda r: set_text(output, f"[完成] {r}"), status="更新中...")
 

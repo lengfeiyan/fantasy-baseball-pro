@@ -152,19 +152,22 @@ def _cmd_draft(args) -> int:
 def _cmd_simulate(args) -> int:
     from .core import DraftEngine
 
-    engine = DraftEngine()
+    method = getattr(args, "method", "vorp")
+    engine = DraftEngine(method=method)
     avail = engine.analyze_availability(target_pick=args.user_pick)
     threshold = args.min_availability
     top = avail[avail["availability_prob"] >= threshold].head(15)
     if top.empty:
         print(f"在可用率 >= {threshold} 时无目标球员，尝试降低 --min-availability")
         return 1
+    value_col = "sgp_total" if method == "sgp" else "vorp"
+    value_label = "SGP" if method == "sgp" else "VORP"
     print(f"第{args.user_pick}顺位高可用目标（可用率 >= {threshold}）：")
     print("-" * 60)
     for _, r in top.iterrows():
         print(
             f"{r['name']:<25} 可用率={r['availability_prob']*100:5.1f}%  "
-            f"VORP={r['vorp']:6.1f}  ADP={r['adp']}"
+            f"{value_label}={r[value_col]:6.1f}  ADP={r['adp']}"
         )
     return 0
 
@@ -251,7 +254,7 @@ def _cmd_fa(args) -> int:
             print(f"  {r.get('pos','?'):<5} {r['name']}")
         return 0
     # recommend
-    analyzer = FAAnalyzer()
+    analyzer = FAAnalyzer(method=getattr(args, "method", "vorp"))
     rec = RecommendationSystem(analyzer)
     position = None if args.position == "All" else args.position
     result = rec.generate_recommendations(
@@ -290,7 +293,9 @@ def _cmd_mlb(args) -> int:
     mlb_id = person["id"]
     name = person.get("fullName", args.name)
     pos = person.get("primaryPosition", {}).get("abbreviation", "?")
-    season = args.season
+    # 修复 M10：默认当前年（修复前硬编码 2025）
+    import datetime
+    season = args.season or datetime.datetime.now().year
 
     print(f"\n{name} ({pos}) | MLB id={mlb_id} | {season}赛季")
     print("=" * 50)
@@ -362,6 +367,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("simulate", help="蒙特卡洛选秀模拟")
     p.add_argument("--user-pick", type=int, default=5, help="你的顺位")
     p.add_argument("--min-availability", type=float, default=0.25, help="最小可用率阈值")
+    p.add_argument("--method", default="vorp", choices=["vorp", "sgp"],
+                   help="评分方法：vorp（默认）或 sgp")
     p.set_defaults(func=_cmd_simulate)
 
     # sleeper
@@ -407,13 +414,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--position", default="All")
     p.add_argument("--risk", default="balanced", choices=["balanced", "conservative", "aggressive"])
     p.add_argument("--top", type=int, default=10)
+    p.add_argument("--method", default="vorp", choices=["vorp", "sgp"],
+                   help="评分方法（recommend 用）")
     p.add_argument("--days-back", type=int, default=30, help="伤病回溯天数（update-injury 用）")
     p.set_defaults(func=_cmd_fa)
 
     # mlb
     p = sub.add_parser("mlb", help="查询 MLB 球员真实统计")
     p.add_argument("name", help="球员姓名（如 'Shohei Ohtani'）")
-    p.add_argument("--season", type=int, default=2025, help="赛季年份")
+    p.add_argument("--season", type=int, default=None,
+                   help="赛季年份（默认当前年）")
     p.add_argument("--statcast", action="store_true", help="同时显示 Statcast")
     p.set_defaults(func=_cmd_mlb)
 

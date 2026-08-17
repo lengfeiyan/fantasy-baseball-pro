@@ -14,7 +14,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from ..config import get_config, resolve_path
+from ..config import get_config, get_season, resolve_path
 from ..db import PlayerRepository, db_session, init_db
 from ..utils.logger import get_logger
 
@@ -68,20 +68,21 @@ class DataIngestor:
         logger.info("数据导入完成: %s", counts)
         return counts
 
-    def ingest_from_web(self, season: int = 2026) -> dict:
+    def ingest_from_web(self, season: Optional[int] = None) -> dict:
         """从 FantasyPros 抓取预测数据并直接入库（无需手动 CSV）。
 
         同时自动填充位置映射（预测表的 Player 列含位置信息），
         解决旧版位置 CSV 也需手动准备的问题。
 
         Args:
-            season: 赛季年份。
+            season: 赛季年份；None 则用配置/当前年（修复 H7）。
 
         Returns:
             各表行数字典。
         """
         from ..data_fetch.projections import fetch_projections
 
+        season = season or get_season()
         logger.info("从网络抓取 %d 赛季预测数据", season)
         hitters_df = fetch_projections("hitters", season)
         pitchers_df = fetch_projections("pitchers", season)
@@ -216,10 +217,13 @@ class DataIngestor:
 
     def _resolve_player_file(self, player_type: str, source: str) -> str:
         """解析某数据源的文件路径。"""
+        season = get_season(self.config)
         if not self.config["data"].get("use_multi_source"):
-            return resolve_path(f"data/{player_type}_2026.csv")
+            # 修复 H7：文件名跟随生效赛季
+            return resolve_path(f"data/{player_type}_{season}.csv")
         pattern = self.config["data"]["file_patterns"][player_type]
-        filename = pattern.format(source=source.lower())
+        # 支持 {source} / {season} 占位符（多余的 kwargs 会被 str.format 忽略）
+        filename = pattern.format(source=source.lower(), season=season)
         return resolve_path(os.path.join("data", filename))
 
     @staticmethod

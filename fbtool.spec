@@ -18,6 +18,8 @@ a = Analysis(
         # 运行时文件打包到 exe 旁边（用户可编辑）
         ("config.yaml", "."),
         ("data", "data"),
+        # 修复 L6：帮助文档随 exe 一起分发
+        ("USER_GUIDE.md", "."),
     ],
     hiddenimports=[
         "tkinter",

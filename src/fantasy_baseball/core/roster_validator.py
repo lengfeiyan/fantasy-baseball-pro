@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from ..config import get_config, resolve_path
+from ..config import find_output_file, get_config
 from ..utils.logger import get_logger
 
 logger = get_logger("roster_validator")
@@ -95,19 +95,28 @@ class RosterValidator:
         )
 
     def analyze_roster_strength(self, draft_log_file: str) -> Optional[StrengthResult]:
-        """分析阵容强度（修复旧版除零 bug）。"""
+        """分析阵容强度（修复旧版除零 bug 与 L4：SGP 日志 vorp 全 0）。"""
         draft_log = self._load(draft_log_file)
         if draft_log is None or "vorp" not in draft_log.columns:
             return None
 
-        total_vorp = float(draft_log["vorp"].sum())
-        avg_vorp = float(draft_log["vorp"].mean())
+        # 修复 L4：旧版 SGP 日志 vorp 列全 0，改用 sgp_total 计算强度
+        value_col = "vorp"
+        if (
+            "sgp_total" in draft_log.columns
+            and float(draft_log["vorp"].sum()) == 0
+            and float(draft_log["sgp_total"].sum()) != 0
+        ):
+            value_col = "sgp_total"
+
+        total_vorp = float(draft_log[value_col].sum())
+        avg_vorp = float(draft_log[value_col].mean())
 
         hitters_vorp = float(
-            draft_log.loc[draft_log["pos"].isin(HITTER_POSITIONS), "vorp"].sum()
+            draft_log.loc[draft_log["pos"].isin(HITTER_POSITIONS), value_col].sum()
         )
         pitchers_vorp = float(
-            draft_log.loc[draft_log["pos"].isin(PITCHER_POSITIONS), "vorp"].sum()
+            draft_log.loc[draft_log["pos"].isin(PITCHER_POSITIONS), value_col].sum()
         )
         # 修复除零 bug
         ratio = (hitters_vorp / pitchers_vorp) if pitchers_vorp != 0 else None
@@ -118,13 +127,13 @@ class RosterValidator:
                 picks = draft_log[draft_log["round"] == rnd]
                 round_quality.append({
                     "round": int(rnd),
-                    "total_vorp": float(picks["vorp"].sum()),
-                    "avg_vorp": float(picks["vorp"].mean()),
+                    "total_vorp": float(picks[value_col].sum()),
+                    "avg_vorp": float(picks[value_col].mean()),
                     "count": len(picks),
                 })
 
-        best_pick = draft_log.loc[draft_log["vorp"].idxmax()] if len(draft_log) else None
-        worst_pick = draft_log.loc[draft_log["vorp"].idxmin()] if len(draft_log) else None
+        best_pick = draft_log.loc[draft_log[value_col].idxmax()] if len(draft_log) else None
+        worst_pick = draft_log.loc[draft_log[value_col].idxmin()] if len(draft_log) else None
 
         return StrengthResult(
             total_vorp=total_vorp,
@@ -139,10 +148,8 @@ class RosterValidator:
 
     @staticmethod
     def _load(draft_log_file: str) -> Optional[pd.DataFrame]:
-        """加载选秀日志 CSV（支持相对项目根的路径）。"""
-        path = draft_log_file
-        if not os.path.isabs(path):
-            path = resolve_path(path)
+        """加载选秀日志 CSV（优先 output/ 目录，其次项目根）。"""
+        path = find_output_file(draft_log_file)
         if not os.path.exists(path):
             logger.error("选秀日志文件不存在: %s", path)
             return None

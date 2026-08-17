@@ -17,7 +17,7 @@ from typing import Optional
 
 import pandas as pd
 
-from ..config import get_config, resolve_path
+from ..config import get_config, get_season, output_path
 from ..db import PlayerRepository, db_session
 from ..utils.logger import get_logger
 
@@ -214,8 +214,9 @@ class ScoringModel:
         """生成排名 CSV 文件，返回绝对路径。"""
         cfg = get_config()
         if output_file is None:
-            output_file = "fantasy_draft_rankings_vorp_2026.csv"
-        output_path = resolve_path(output_file)
+            # 修复 H7：文件名跟随生效赛季，不再硬编码 2026
+            output_file = f"fantasy_draft_rankings_vorp_{get_season(cfg)}.csv"
+        path = output_path(output_file)
 
         rankings = self.calculate_vorp()
         for col in RANKING_COLUMNS:
@@ -223,12 +224,12 @@ class ScoringModel:
                 rankings[col] = None
         rankings = rankings[RANKING_COLUMNS]
 
-        rankings.to_csv(output_path, index=False)
-        logger.info("排名文件已保存: %s（%d 名球员）", output_path, len(rankings))
+        rankings.to_csv(path, index=False)
+        logger.info("排名文件已保存: %s（%d 名球员）", path, len(rankings))
         if len(rankings) > 0:
             top = rankings.iloc[0]
             logger.info("排名第一: %s (VORP: %.2f)", top["name"], top["vorp"])
-        return output_path
+        return path
 
     # -------------------------------------------------------------- 内部工具
     def _run(self, func):

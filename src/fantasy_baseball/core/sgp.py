@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-from ..config import get_config, resolve_path
+from ..config import get_config, get_season, output_path
 from ..db import PlayerRepository, db_session
 from ..utils.logger import get_logger
 
@@ -167,8 +167,9 @@ class SGPModel:
     def generate_rankings(self, output_file: Optional[str] = None) -> str:
         """生成 SGP 排名 CSV，返回路径。"""
         if output_file is None:
-            output_file = "fantasy_draft_rankings_sgp_2026.csv"
-        output_path = resolve_path(output_file)
+            # 修复 H7：文件名跟随生效赛季，不再硬编码 2026
+            output_file = f"fantasy_draft_rankings_sgp_{get_season()}.csv"
+        path = output_path(output_file)
 
         df = self.calculate_sgp()
         # 保留关键列
@@ -176,9 +177,9 @@ class SGPModel:
         keep += [c for c in ["sgp_R", "sgp_HR", "sgp_RBI", "sgp_SB", "sgp_AVG",
                              "sgp_W", "sgp_SV", "sgp_K", "sgp_ERA", "sgp_WHIP"]
                  if c in df.columns]
-        df[[c for c in keep if c in df.columns]].to_csv(output_path, index=False)
-        logger.info("SGP 排名已保存: %s", output_path)
-        return output_path
+        df[[c for c in keep if c in df.columns]].to_csv(path, index=False)
+        logger.info("SGP 排名已保存: %s", path)
+        return path
 
     # -------------------------------------------------------------- 内部
     def _run(self, func):

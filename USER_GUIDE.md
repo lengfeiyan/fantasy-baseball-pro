@@ -1,7 +1,7 @@
 # Fantasy Baseball Pro 用户帮助文档
 
 > **版本**：2026.1.0
-> **更新日期**：2026-08-11
+> **更新日期**：2026-08-17
 > **适用对象**：从零基础新手到资深 Fantasy Baseball 玩家
 
 ---
@@ -107,8 +107,8 @@ pip install numba requests
 ### 一步到位流程
 
 ```bash
-# 1. 抓取真实预测数据（首次需联网，约10秒）
-python -m fantasy_baseball fetch-projections --season 2026
+# 1. 抓取真实预测数据（首次需联网，约10秒；--season 可省略，默认当前赛季）
+python -m fantasy_baseball fetch-projections
 
 # 2. 生成 VORP 排名
 python -m fantasy_baseball rank
@@ -125,6 +125,8 @@ python -m fantasy_baseball sleeper --min-adp 100 --max-adp 400
 # 6. 查询某球员的真实数据
 python -m fantasy_baseball mlb "Aaron Judge" --statcast
 ```
+
+> 所有输出文件（排名 CSV、选秀日志、FA 推荐导出）统一存放在 `output/` 目录，不再散落在项目根目录。
 
 或者直接启动 GUI：
 
@@ -170,7 +172,12 @@ python -m fantasy_baseball gui
 | 选秀轮数 | 总轮次（默认 15） |
 | 打者评分权重 | R/HR/RBI/SB/AVG 等各项的权重（正=加分） |
 | 投手评分权重 | W/SV/HOLD/ERA/WHIP/K_per_9（ERA/WHIP 设为负值） |
+| 阵容槽位 | 各位置的阵容名额 |
 | 默认策略 | conservative / balanced / aggressive |
+| 价值股标记 | 选秀日志中是否标注被低估的价值股 |
+| stream 席位数 | 用于流水的机动席位，影响 VORP 动态替代水平（默认 5） |
+| 风险调整系数 | upside/floor 与均值的偏离幅度（默认 0.1） |
+| SGP 分母 | 每个类别每升一名所需统计量（12 队经验值，按联盟规模自动缩放） |
 
 保存时**保留原有注释**（逐行更新，不会丢失你写的中文说明）。
 
@@ -181,7 +188,7 @@ python -m fantasy_baseball gui
 | 按钮 | 功能 |
 |------|------|
 | **导入数据** | 等同数据管理的 CSV 导入 |
-| **生成排名** | 计算 VORP 排名，输出到 `fantasy_draft_rankings_vorp_2026.csv` |
+| **生成排名** | 计算 VORP 排名，输出到 `output/fantasy_draft_rankings_vorp_<赛季>.csv`（SGP 方法则输出 `output/fantasy_draft_rankings_sgp_<赛季>.csv`） |
 | **准备ADP** | 抓取/刷新 ADP 数据 |
 | **运行完整流水线** | 上述三步一键执行 |
 
@@ -282,7 +289,7 @@ python -m fantasy_baseball <命令> [参数]
 
 ```bash
 # 从网络抓取预测（推荐）
-python -m fantasy_baseball fetch-projections --season 2026
+python -m fantasy_baseball fetch-projections
 
 # 从本地 CSV 导入（离线备选）
 python -m fantasy_baseball ingest
@@ -333,7 +340,7 @@ python -m fantasy_baseball sleeper \
 
 ```bash
 # 从选秀日志导入阵容
-python -m fantasy_baseball roster import draft_log_pick5_balanced.csv
+python -m fantasy_baseball roster import output/draft_log_pick5_balanced.csv
 
 # 查看当前阵容 + 位置填充状态
 python -m fantasy_baseball roster show
@@ -350,10 +357,10 @@ python -m fantasy_baseball roster remove "Mike Trout"
 
 ```bash
 # 基础验证
-python -m fantasy_baseball validate draft_log_pick5_balanced.csv
+python -m fantasy_baseball validate output/draft_log_pick5_balanced.csv
 
 # 含强度分析
-python -m fantasy_baseball validate draft_log_pick5_balanced.csv --analyze
+python -m fantasy_baseball validate output/draft_log_pick5_balanced.csv --analyze
 ```
 
 ### 5.7 FA 分析
@@ -435,7 +442,7 @@ score = R*权重 + HR*权重 + RBI*权重 + SB*权重 + AVG*权重
 
 （权重来自 `config.yaml` 的 `league.scoring.hitters`）
 
-**替代水平**：每个位置的 25 分位数（即同位置后 25% 的平均水本）。
+**替代水平**：动态替代水平——联盟共需 `league_size × (各位置槽位之和 - stream_slots)` 名该位置球员，取排名在此处的球员得分作为替代水平（`stream_slots` 为轮换/流水的机动席位，默认 5，可在「配置设置 → 评分与风险」调整）。
 
 ```
 vorp = score - 替代水平
@@ -449,7 +456,7 @@ score = W*权重 + SV*权重 + HOLD*权重 + ERA*权重 + WHIP*权重 + K_per_9*
 
 （ERA/WHIP 权重设为负值，越低越好）
 
-投手的替代水平是**全体投手的 25 分位数**。
+投手的替代水平按 **SP / RP 分组分别计算**（两者价值结构不同，混用会扭曲替代水平）。
 
 ### 7.2 SGP（Standings Gain Points）
 
@@ -560,10 +567,11 @@ vorp_floor  = vorp - std_dev * adjustment_factor   （不低于 0）
 ```yaml
 # ===== 数据处理 =====
 data:
+  season: 2026                     # 生效赛季（默认当前年，排名文件名等随之生成）
   use_multi_source: true          # 多源预测融合（仅 CSV 导入模式有效）
-  file_patterns:                  # CSV 文件名模板
-    hitters: "hitters_2026_{source}.csv"
-    pitchers: "pitchers_2026_{source}.csv"
+  file_patterns:                  # CSV 文件名模板（{season} 处填年份）
+    hitters: "hitters_{season}_{source}.csv"
+    pitchers: "pitchers_{season}_{source}.csv"
   positions_file: "data/player_positions_2025.csv"  # 位置映射（网络获取时不需要）
 
 # ===== 预测源权重（仅 CSV 多源模式有效）=====
@@ -637,11 +645,11 @@ fa_analyzer:
 
 ```bash
 # 1. 获取数据
-python -m fantasy_baseball fetch-projections --season 2026
+python -m fantasy_baseball fetch-projections
 python -m fantasy_baseball rank
 python -m fantasy_baseball adp
 
-# 2. 看排名（打开生成的 fantasy_draft_rankings_vorp_2026.csv）
+# 2. 看排名（打开生成的 output/fantasy_draft_rankings_vorp_<赛季>.csv）
 
 # 3. 模拟你在不同顺位的表现
 python -m fantasy_baseball draft --pick 3 --strategy balanced
@@ -659,7 +667,7 @@ python -m fantasy_baseball simulate --user-pick 5 --min-availability 0.30
 
 ```bash
 # 1. 导入你的阵容（从选秀日志）
-python -m fantasy_baseball roster import draft_log_pick5_balanced.csv
+python -m fantasy_baseball roster import output/draft_log_pick5_balanced.csv
 
 # 2. 更新数据
 python -m fantasy_baseball fa update-injury --days-back 30
@@ -737,7 +745,7 @@ pip install numba
 **A**: 阵容未导入。先在「阵容验证」tab 导入阵容（从选秀日志），或在命令行：
 
 ```bash
-python -m fantasy_baseball roster import draft_log_pick5_balanced.csv
+python -m fantasy_baseball roster import output/draft_log_pick5_balanced.csv
 python -m fantasy_baseball roster show    # 确认阵容已导入
 ```
 
@@ -751,7 +759,7 @@ python -m fantasy_baseball roster show    # 确认阵容已导入
 
 ```bash
 rm fantasy_baseball.db
-python -m fantasy_baseball fetch-projections --season 2026   # 重新填充
+python -m fantasy_baseball fetch-projections   # 重新填充
 ```
 
 ### Q: 支持 Keeper / Dynasty 联盟吗
@@ -817,7 +825,7 @@ python -m fantasy_baseball adp --force
 fbtool/
 ├── src/fantasy_baseball/          # 主包
 │   ├── __main__.py                # 入口：python -m fantasy_baseball
-│   ├── cli.py                     # 命令行子命令（13 个）
+│   ├── cli.py                     # 命令行子命令（12 个）
 │   ├── config.py                  # 统一配置（加载/校验/保存）
 │   ├── db/                        # 数据库层
 │   │   ├── connection.py          #   连接管理 + db_session()

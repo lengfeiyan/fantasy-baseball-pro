@@ -57,7 +57,10 @@ def create_tab(parent: tk.Widget, app) -> None:
             pick = int(pick_var.get())
             sim = SnakeDraftSimulator(method=method)
             log = sim.simulate_draft(user_pick=pick, strategy=strategy_var.get())
-            log_path = sim.simulate_and_save(user_pick=pick, strategy=strategy_var.get())
+            # 传入已算好的 log，避免 simulate_and_save 内部再模拟一遍（修复 L1）
+            log_path = sim.simulate_and_save(
+                user_pick=pick, strategy=strategy_var.get(), log_df=log
+            )
             user_picks = log[log["team"] == pick]
             value_label = "SGP" if method == "sgp" else "VORP"
             value_key = "sgp_total" if method == "sgp" else "vorp"

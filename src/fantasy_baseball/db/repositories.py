@@ -145,6 +145,9 @@ class FaRepository(_BaseRepository):
         ).fetchone()
         return dict(row) if row else None
 
+    def count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM fa_pool").fetchone()[0]
+
     def remove_from_pool(self, name: str) -> bool:
         cur = self.conn.execute("DELETE FROM fa_pool WHERE name = ?", (name,))
         return cur.rowcount > 0

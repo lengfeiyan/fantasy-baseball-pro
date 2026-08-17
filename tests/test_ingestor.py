@@ -55,9 +55,10 @@ def test_ingestor_single_source(fresh_conn, tmpdir, monkeypatch):
     )
 
     ing = DataIngestor(conn=fresh_conn)
-    # 配置为单源模式
+    # 配置为单源模式（显式 season=2026，保持路径断言确定性，不受当前年影响）
     monkeypatch.setattr(ing, "config", {
-        "data": {"use_multi_source": False,
+        "data": {"season": 2026,
+                 "use_multi_source": False,
                  "file_patterns": {"hitters": "x.csv", "pitchers": "y.csv"},
                  "positions_file": "none.csv"},
         "projections": {"sources": ["SINGLE"], "weights": {"STEAMER": 1.0}},

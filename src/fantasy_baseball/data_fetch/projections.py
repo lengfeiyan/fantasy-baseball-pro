@@ -43,13 +43,13 @@ _PITCHER_COL_MAP = {
 
 
 def fetch_projections(
-    player_type: str, season: int = 2026
+    player_type: str, season: Optional[int] = None
 ) -> pd.DataFrame:
     """从 FantasyPros 抓取预测数据。
 
     Args:
         player_type: "hitters" 或 "pitchers"。
-        season: 赛季年份。
+        season: 赛季年份；None 则用当前年（修复 H7）。
 
     Returns:
         DataFrame，列名对齐项目内部格式（与 ingestor 的 CSV 期望一致）。
@@ -59,6 +59,9 @@ def fetch_projections(
     Raises:
         ValueError: player_type 非法或解析失败。
     """
+    if season is None:
+        from ..config import current_season
+        season = current_season()
     if player_type == "hitters":
         return _fetch_hitters(season)
     elif player_type == "pitchers":

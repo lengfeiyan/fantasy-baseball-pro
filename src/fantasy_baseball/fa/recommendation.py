@@ -148,7 +148,7 @@ class RecommendationSystem:
         self, recommendations: List[Dict[str, Any]], output_file: str
     ) -> str:
         """导出推荐到 CSV，返回绝对路径。"""
-        from ..config import resolve_path
+        from ..config import output_path
 
         rows = []
         for r in recommendations:
@@ -164,10 +164,7 @@ class RecommendationSystem:
             }
             rows.append(row)
         df = pd.DataFrame(rows)
-        path = resolve_path(output_file)
-        # 确保输出目录存在（reports/ 等目录首次运行时不存在）
-        import os
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        path = output_path(output_file)
         df.to_csv(path, index=False)
         logger.info("推荐已导出: %s", path)
         return path

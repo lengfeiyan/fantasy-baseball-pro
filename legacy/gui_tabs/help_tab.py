@@ -26,7 +26,7 @@ Fantasy Baseball Pro v{__version__}
   python -m fantasy_baseball draft --pick 5
   python -m fantasy_baseball simulate --user-pick 5 --iterations 5000
   python -m fantasy_baseball sleeper
-  python -m fantasy_baseball validate draft_log_pick5_balanced.csv
+  python -m fantasy_baseball validate output/draft_log_pick5_balanced.csv
   python -m fantasy_baseball mlb "Aaron Judge" --statcast  # 查真实数据
   python -m fantasy_baseball fa update-injury --days-back 60
 

@@ -14,7 +14,7 @@ from typing import List, Optional
 
 import pandas as pd
 
-from ..config import resolve_path
+from ..config import find_output_file, get_season, resolve_path
 from ..utils.logger import get_logger
 from .adp import get_adp
 from .scoring import ScoringModel
@@ -36,6 +36,7 @@ def find_sleepers(
     position: Optional[str] = None,
     top: int = 15,
     use_statcast: bool = True,
+    season: Optional[int] = None,
 ) -> pd.DataFrame:
     """寻找被低估的球员。
 
@@ -52,7 +53,7 @@ def find_sleepers(
     Returns:
         筛选后的 DataFrame，含 bias / statcast_signal / statcast_strength 列。
     """
-    rankings = _load_rankings(rankings_file)
+    rankings = _load_rankings(rankings_file, season or get_season())
     adp = _load_adp(adp_file)
 
     # 合并排名与 ADP
@@ -77,7 +78,7 @@ def find_sleepers(
     candidates["statcast_signal"] = ""
     candidates["statcast_strength"] = 0
     if use_statcast:
-        _apply_statcast(candidates, statcast_batter_file, statcast_pitcher_file)
+        _apply_statcast(candidates, statcast_batter_file, statcast_pitcher_file, season)
 
     # 排序：先按 statcast_strength 再按 bias
     candidates = candidates.sort_values(
@@ -86,11 +87,11 @@ def find_sleepers(
     return candidates.reset_index(drop=True)
 
 
-def _load_rankings(rankings_file: Optional[str]) -> pd.DataFrame:
+def _load_rankings(rankings_file: Optional[str], season: int) -> pd.DataFrame:
     """加载排名 CSV；未提供则现算。"""
     if rankings_file is None:
-        rankings_file = "fantasy_draft_rankings_vorp_2026.csv"
-    path = resolve_path(rankings_file)
+        rankings_file = f"fantasy_draft_rankings_vorp_{season}.csv"
+    path = find_output_file(rankings_file)
     if os.path.exists(path):
         return pd.read_csv(path)
     logger.info("排名文件不存在，现算中: %s", path)
@@ -106,12 +107,29 @@ def _apply_statcast(
     candidates: pd.DataFrame,
     batter_file: Optional[str],
     pitcher_file: Optional[str],
+    season: Optional[int] = None,
 ) -> None:
-    """对候选球员叠加 Statcast 信号（直接修改 candidates）。"""
+    """对候选球员叠加 Statcast 信号（直接修改 candidates）。
+
+    修复 M5：原实现读本地 CSV（data/statcast_batter_2025.csv 等，不存在），
+    导致「启用Statcast增强」开关恒无效。现改为：
+    1. 若用户提供了显式 CSV 文件（batter_file/pitcher_file），仍从文件读
+    2. 否则通过 MLBStatsClient.search_player + StatcastFetcher 获取真实数据
+       （两者都有 JSON 缓存，候选球员通常仅十几个，开销可控）
+    """
     pos_col = "pos" if "pos" in candidates.columns else "pos_adp"
 
-    # 打者 Statcast
-    batter_df = _load_statcast(batter_file, "data/statcast_batter_2025.csv")
+    # 显式文件路径优先（向后兼容手动 CSV 工作流）
+    batter_df = _load_statcast(batter_file, None) if batter_file else None
+    pitcher_df = _load_statcast(pitcher_file, None) if pitcher_file else None
+
+    # 无文件时走真实 API（带缓存）
+    if batter_df is None or pitcher_df is None:
+        _apply_statcast_from_api(candidates, pos_col, season,
+                                 need_batter=batter_df is None,
+                                 need_pitcher=pitcher_df is None)
+
+    # 处理显式 CSV 数据
     if batter_df is not None:
         n = 0
         for idx, player in candidates[candidates[pos_col].isin(HITTER_POSITIONS)].iterrows():
@@ -123,10 +141,8 @@ def _apply_statcast(
                 candidates.at[idx, "statcast_signal"] = "; ".join(signals)
                 candidates.at[idx, "statcast_strength"] = strength
                 n += 1
-        logger.info("Statcast 打者信号：命中 %d 人", n)
+        logger.info("Statcast 打者信号（CSV）：命中 %d 人", n)
 
-    # 投手 Statcast
-    pitcher_df = _load_statcast(pitcher_file, "data/statcast_pitcher_2025.csv")
     if pitcher_df is not None:
         n = 0
         for idx, player in candidates[candidates[pos_col].isin({"SP", "RP"})].iterrows():
@@ -138,14 +154,100 @@ def _apply_statcast(
                 candidates.at[idx, "statcast_signal"] = "; ".join(signals)
                 candidates.at[idx, "statcast_strength"] = strength
                 n += 1
-        logger.info("Statcast 投手信号：命中 %d 人", n)
+        logger.info("Statcast 投手信号（CSV）：命中 %d 人", n)
 
 
-def _load_statcast(explicit: Optional[str], default_rel: str) -> Optional[pd.DataFrame]:
-    """加载 Statcast CSV，规范化姓名为 "First Last"。返回 None 表示不可用。"""
-    path = resolve_path(explicit) if explicit else resolve_path(default_rel)
-    if not os.path.exists(path):
-        logger.debug("Statcast 文件不存在: %s", path)
+def _apply_statcast_from_api(
+    candidates: pd.DataFrame, pos_col: str, season: Optional[int],
+    need_batter: bool, need_pitcher: bool,
+) -> None:
+    """通过 MLB API（带缓存）给候选球员叠加 Statcast 信号。"""
+    try:
+        from ..data_fetch.mlb_api import MLBStatsClient
+        from ..data_fetch.statcast import StatcastFetcher
+    except ImportError:
+        logger.warning("数据抓取模块不可用，跳过 Statcast 增强")
+        return
+
+    if season is None:
+        import datetime
+        season = datetime.datetime.now().year - 1  # Statcast 用最近完整赛季
+
+    client = MLBStatsClient()
+    fetcher = StatcastFetcher()
+    n = 0
+    for idx, player in candidates.iterrows():
+        pos = player.get(pos_col, "")
+        is_hitter = pos in HITTER_POSITIONS
+        if (is_hitter and not need_batter) or (not is_hitter and not need_pitcher):
+            continue
+        try:
+            person = client.search_player(player["name"])
+            if not person:
+                continue
+            mlb_id = person["id"]
+            sc = (
+                fetcher.fetch_hitter_data(mlb_id, season)
+                if is_hitter else fetcher.fetch_pitcher_data(mlb_id, season)
+            )
+            if not sc:
+                continue
+            signals, strength = (
+                _batter_signals_dict(sc) if is_hitter else _pitcher_signals_dict(sc)
+            )
+            if signals:
+                candidates.at[idx, "statcast_signal"] = "; ".join(signals)
+                candidates.at[idx, "statcast_strength"] = strength
+                n += 1
+        except Exception as e:
+            logger.debug("Statcast 查询失败 (%s): %s", player.get("name"), e)
+    logger.info("Statcast 信号（API）：命中 %d 人", n)
+
+
+def _batter_signals_dict(sc: dict):
+    """从 StatcastFetcher 返回的 dict 提取打者信号。"""
+    signals: List[str] = []
+    strength = 0
+    xwoba = sc.get("xwOBA")
+    avg = sc.get("AVG") or sc.get("avg")
+    if _num(xwoba) and _num(avg) and xwoba >= 0.340 and avg < 0.250:
+        signals.append("xwOBA ≥.340 但 AVG <.250（运气差）")
+        strength += 2
+    ev = sc.get("exit_velocity")
+    br = sc.get("barrel_rate")
+    if _num(ev) and _num(br) and ev >= 90 and br >= 0.08:
+        signals.append("高 EV + 高桶率（硬核打者）")
+        strength += 2
+    return signals, strength
+
+
+def _pitcher_signals_dict(sc: dict):
+    """从 StatcastFetcher 返回的 dict 提取投手信号。"""
+    signals: List[str] = []
+    strength = 0
+    xera = sc.get("xera", sc.get("xERA"))
+    era = sc.get("ERA") or sc.get("era")
+    if _num(xera) and _num(era) and xera <= 3.50 and era > xera + 0.5:
+        signals.append("xERA ≤3.50 但 ERA 偏高（运气差）")
+        strength += 2
+    whiff = sc.get("whiff_rate")
+    if _num(whiff) and whiff >= 0.30:
+        signals.append("高三振挥空率（潜在三振红利）")
+        strength += 1
+    return signals, strength
+
+
+def _load_statcast(explicit: Optional[str], default_rel: Optional[str]) -> Optional[pd.DataFrame]:
+    """加载 Statcast CSV，规范化姓名为 "First Last"。返回 None 表示不可用。
+
+    default_rel 为 None 时（未提供显式文件）直接返回 None，
+    由调用方走 API 路径（修复 M5）。
+    """
+    path = resolve_path(explicit) if explicit else (
+        resolve_path(default_rel) if default_rel else None
+    )
+    if path is None or not os.path.exists(path):
+        logger.debug("Statcast 文件不存在或未提供: %s", path)
         return None
     try:
         df = pd.read_csv(path)

@@ -1,7 +1,7 @@
 # 待办事项（TODO）
 
-> 最后更新：2026-08-14
-> 当前版本：2026.1.0 | 测试：135 passed | 已打包 Windows exe
+> 最后更新：2026-08-17
+> 当前版本：2026.1.0 | 测试：138 passed | 已打包 Windows exe
 
 ---
 
@@ -51,7 +51,7 @@
 ## 🟡 中严重度（体验/一致性，2026-08-14）
 
 > ✅ 第二波已修复（2026-08-14）：M1、M2、M3、M4、M10
-> 待处理：M5、M6、M7、M8
+> ✅ 第三波已修复（2026-08-17）：M5、M6、M7、M8
 
 ### ✅ M1 GUI 阵容导入顺位硬编码为 5（已修复）
 - 修复：roster tab 加「你的顺位」输入框，导入时按输入顺位提取阵容
@@ -68,42 +68,37 @@
 ### ✅ M10 「数据探索」和 CLI mlb 默认查 2025 赛季（已修复）
 - 修复：默认改为当前年（datetime.now().year），CLI --season 默认 None
 
-### M5 Sleeper「启用Statcast增强」开关无效
-- sleeper.py 读 data/statcast_batter_2025.csv，实际只有 statcast_data_sample.csv
-- 修复：接真实 Statcast 缓存（data/cache/*.json）或禁用该开关并说明
+### ✅ M5 Sleeper「启用Statcast增强」开关无效（已修复 2026-08-17）
+- 修复：无显式 CSV 时通过 MLBStatsClient.search_player + StatcastFetcher 走真实 API（带 JSON 缓存）
 
-### M6 配置 GUI 只能编辑一小部分
-- 只能改 league 主项+默认策略；data/projections/risk_model/sgp/fa_analyzer/logging/scoring.stream_slots 全得手改 YAML
-- 修复：分阶段补全配置 tab（或至少加 YAML 文本编辑器）
+### ✅ M6 配置 GUI 只能编辑一小部分（已修复 2026-08-17）
+- 修复：配置 tab 新增价值股标记下拉框、stream 席位数、风险调整系数、SGP 分母（打者+投手）；新增构造测试
 
-### M7 文档多处与现实不符
-- README 说 13 选项卡（实际 10）；USER_GUIDE 说 13 子命令（实际 12）；"25 分位数"描述已过时（现在是动态替代水平）
-- 修复：同步文档
+### ✅ M7 文档多处与现实不符（已修复 2026-08-17）
+- 修复：README/USER_GUIDE 同步为 10 选项卡、12 子命令、动态替代水平、output/ 目录、赛季参数化
 
-### M8 输出文件散落根目录
-- 排名 CSV/选秀日志/adp.csv/db/logs 全在根目录；同名选秀日志静默覆盖
-- 修复：统一 output/ 目录 + 时间戳文件名
+### ✅ M8 输出文件散落根目录（已修复 2026-08-17）
+- 修复：新增 config.output_path()/find_output_file()，排名/选秀日志/FA 导出统一到 output/，读取端兼容旧根目录文件
 
 ---
 
 ## 🟢 低严重度（2026-08-14）
 
-- **L1** 选秀模拟重复执行两遍（draft_center.py:59-60 显示一次+保存一次）
+- ✅ **L1** 选秀模拟重复执行两遍（已修复：simulate_and_save 支持传入 log_df）
 - **L2** 错误信息中英混杂（中文按钮弹英文异常）
-- **L3** `_safe_float` 把负数解析成正数（mlb_api.py:337 `replace("-","")`）
-- **L4** SGP 选秀日志 vorp 全 0，阵容强度分析显示 0.00
-- **L5** 文档细节出入（按钮表漏「查看排名」、符号描述不符）
-- **L6** exe 不带 USER_GUIDE，GUI 首页却指向它
-- **L7** 查看状态不含 FA 表行数；死 tab 文件（draft_tab/help_tab/injury/monte_carlo_tab/statcast）未清理
+- ✅ **L3** `_safe_float` 把负数解析成正数（已修复：保留负号，只剔除 "-/-.---/---" 占位符，新增回归测试）
+- ✅ **L4** SGP 选秀日志 vorp 全 0（已修复：SGP 时 vorp 列回填 sgp_total；强度分析自动识别）
+- ✅ **L5** 文档细节出入（已随 M7 同步修复）
+- ✅ **L6** exe 不带 USER_GUIDE（已修复：fbtool.spec datas 加入 USER_GUIDE.md）
+- ✅ **L7** 查看状态不含 FA 表行数；死 tab 文件（已修复：draft_tab/help_tab/injury/monte_carlo_tab/statcast 归档到 legacy/gui_tabs/）
 
 ---
 
 ## 🌱 未来隐患
 
-### H7 2026/2025 大面积硬编码
-- 排名文件名 fantasy_draft_rankings_vorp_2026.csv、默认赛季 2026/2025、CSV 模板 *_2026.csv
-- 2027 年将静默产出错误文件名 / 查两年前数据
-- 修复：赛季参数化（config 加 season 字段，文件名动态生成）
+### ✅ H7 2026/2025 大面积硬编码（已修复 2026-08-17）
+- config 新增 `data.season` 字段（默认当前年）；排名文件名、抓取默认年份、CSV 模板动态生成
+- CLI `--season` 默认 None（当前年）；`{season}` 占位符可用于 file_patterns
 
 ---
 
@@ -143,6 +138,18 @@
 ## ✅ 已完成项
 
 以下在本次开发中已实现，记录在此供追溯：
+
+### 2026-08-17 完成（第三波修复：剩余审计项）
+- [x] M5 Sleeper Statcast 走真实 API（无文件时 search_player + StatcastFetcher，带缓存）
+- [x] M6 配置 GUI 补全：价值股标记、stream 席位数、风险调整系数、SGP 分母
+- [x] M8 输出统一到 output/（config.output_path/find_output_file，读端兼容旧路径）
+- [x] M7+L5 文档同步现实（10 选项卡/12 子命令/动态替代水平/output/）
+- [x] L1 选秀模拟不再执行两遍（simulate_and_save 支持传入 log_df）
+- [x] L3 _safe_float 保留负号（只剔除占位符），新增回归测试
+- [x] L4 SGP 日志 vorp 回填 sgp_total，强度分析自动识别
+- [x] L6 exe 打包携带 USER_GUIDE.md
+- [x] L7 死 tab 文件归档 legacy/gui_tabs/；查看状态补充 fa_pool/injury_reports/user_roster 行数
+- [x] H7 赛季参数化（config data.season，文件名/默认年份动态生成，支持 {season} 占位符）
 
 ### 2026-08-14 完成（评分算法最终版）
 - [x] #5 类别平衡约束（选秀模拟给弱势类别球员 bonus，仅用户球队生效）

@@ -31,10 +31,12 @@ def _cmd_ingest(args) -> int:
 
 def _cmd_fetch_projections(args) -> int:
     """从 FantasyPros 抓取真实预测数据并入库。"""
+    from .config import get_season
     from .core import DataIngestor
 
-    counts = DataIngestor().ingest_from_web(season=args.season)
-    print(f"[完成] 从 FantasyPros 抓取预测数据（{args.season}赛季）：")
+    season = args.season or get_season()
+    counts = DataIngestor().ingest_from_web(season=season)
+    print(f"[完成] 从 FantasyPros 抓取预测数据（{season}赛季）：")
     for k, v in counts.items():
         print(f"  {k}: {v}")
     print("\n现在可以运行: python -m fantasy_baseball rank")
@@ -127,7 +129,6 @@ def _cmd_rank(args) -> int:
         from .core import ScoringModel
         path = ScoringModel().generate_rankings()
         print(f"[完成] VORP 排名已生成：{path}")
-    return 0
     return 0
 
 
@@ -338,7 +339,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # fetch-projections
     p = sub.add_parser("fetch-projections", help="从 FantasyPros 抓取真实预测数据")
-    p.add_argument("--season", type=int, default=2026, help="赛季年份")
+    p.add_argument("--season", type=int, default=None, help="赛季年份（默认当前年）")
     p.set_defaults(func=_cmd_fetch_projections)
 
     # rank

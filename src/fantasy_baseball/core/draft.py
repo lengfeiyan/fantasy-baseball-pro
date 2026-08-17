@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from ..config import get_config, resolve_path
+from ..config import get_config, output_path
 from ..utils.logger import get_logger
 from .adp import ADPCache
 from .scoring import ScoringModel
@@ -93,7 +93,9 @@ class SnakeDraftSimulator:
                     "name": player["name"],
                     "team_name": player.get("team"),
                     "pos": player.get("pos"),
-                    "vorp": player.get("vorp", 0),
+                    # 修复 L4：SGP 排名没有 vorp 列，日志里 vorp 全 0，
+                    # 导致阵容强度分析显示错误。SGP 时用 sgp_total 填充 vorp 列。
+                    "vorp": player.get("vorp", player.get("sgp_total", 0)),
                     "vorp_upside": player.get("vorp_upside", 0),
                     "vorp_floor": player.get("vorp_floor", 0),
                     "sgp_total": player.get("sgp_total", 0),
@@ -107,13 +109,22 @@ class SnakeDraftSimulator:
         return log_df
 
     def simulate_and_save(
-        self, user_pick: int = 1, strategy: Optional[str] = None, output_file: Optional[str] = None
+        self,
+        user_pick: int = 1,
+        strategy: Optional[str] = None,
+        output_file: Optional[str] = None,
+        log_df: Optional[pd.DataFrame] = None,
     ) -> str:
-        """模拟并保存日志到 CSV，返回绝对路径。"""
-        log_df = self.simulate_draft(user_pick, strategy)
+        """模拟并保存日志到 CSV，返回绝对路径。
+
+        修复 L1：此前 GUI 先调 simulate_draft 展示、再调 simulate_and_save 保存，
+        导致选秀被执行两遍（两次结果可能不一致）。现支持传入已算好的 log_df。
+        """
+        if log_df is None:
+            log_df = self.simulate_draft(user_pick, strategy)
         if output_file is None:
             output_file = f"draft_log_pick{user_pick}_{strategy or self.default_strategy}.csv"
-        path = resolve_path(output_file)
+        path = output_path(output_file)
         log_df.to_csv(path, index=False)
         logger.info("选秀日志已保存: %s", path)
         return path

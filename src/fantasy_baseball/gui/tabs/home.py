@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from ... import __version__
+from ...config import current_season
 from ._widgets import set_text, text_display
 
 
@@ -22,14 +23,16 @@ HELP_TEXT = f"""\
 
 命令行使用
 ==========================================
-  python -m fantasy_baseball fetch-projections --season 2026
+  python -m fantasy_baseball fetch-projections --season {current_season()}
   python -m fantasy_baseball rank
   python -m fantasy_baseball adp
   python -m fantasy_baseball draft --pick 5
   python -m fantasy_baseball sleeper
-  python -m fantasy_baseball roster import draft_log_pick5_balanced.csv
+  python -m fantasy_baseball roster import output/draft_log_pick5_balanced.csv
   python -m fantasy_baseball mlb "Aaron Judge" --statcast
   python -m fantasy_baseball fa recommend
+
+所有生成的排名/选秀日志/FA 导出统一存放在 output/ 目录。
 
 真实数据源（全部免费、无需 key）
 ==========================================

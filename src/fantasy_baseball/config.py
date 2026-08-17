@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import copy
+import datetime
 import os
 from typing import Any, Dict, Optional
 
@@ -24,11 +25,20 @@ logger = get_logger("config")
 
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.yaml")
 
+
+def current_season() -> int:
+    """当前赛季年份（按日历年）。修复 H7：不再硬编码 2026。"""
+    return datetime.date.today().year
+
 # 集中定义所有默认值（消除旧版散落在 6 个 _validate_* 方法里的默认值漂移）
 DEFAULTS: Dict[str, Any] = {
     "data": {
+        "season": current_season(),
         "use_multi_source": False,
-        "file_patterns": {"hitters": "hitters_2026.csv", "pitchers": "pitchers_2026.csv"},
+        "file_patterns": {
+            "hitters": f"hitters_{current_season()}_steamer.csv",
+            "pitchers": f"pitchers_{current_season()}_steamer.csv",
+        },
         "positions_file": "data/player_positions_2025.csv",
     },
     "projections": {
@@ -160,11 +170,67 @@ def get_db_path() -> str:
     return os.path.join(PROJECT_ROOT, "fantasy_baseball.db")
 
 
+def get_season(config: Optional[Dict[str, Any]] = None) -> int:
+    """返回生效的赛季年份（修复 H7：统一从配置读取，默认当前年）。
+
+    Args:
+        config: 已加载的配置 dict；None 则取 get_config()。
+
+    Returns:
+        赛季年份 int。
+    """
+    cfg = config or get_config()
+    try:
+        return int(cfg.get("data", {}).get("season") or current_season())
+    except (TypeError, ValueError):
+        return current_season()
+
+
 def resolve_path(relative_path: str) -> str:
     """将相对路径解析为相对项目根的绝对路径。已是绝对路径则原样返回。"""
     if os.path.isabs(relative_path):
         return relative_path
     return os.path.join(PROJECT_ROOT, relative_path)
+
+
+def output_path(filename: str) -> str:
+    """把输出文件放入统一的 output/ 目录（自动创建）。
+
+    修复 M8：此前排名 CSV/选秀日志/FA 导出全部散落在项目根目录，
+    且同名文件静默覆盖。统一收进 output/ 子目录。
+
+    Args:
+        filename: 文件名（不含目录部分；若含则只取文件名）。
+
+    Returns:
+        output/<filename> 的绝对路径，目录已确保存在。
+    """
+    out_dir = os.path.join(PROJECT_ROOT, "output")
+    os.makedirs(out_dir, exist_ok=True)
+    return os.path.join(out_dir, os.path.basename(filename))
+
+
+def find_output_file(filename: str) -> str:
+    """定位输出/数据文件：优先 output/ 目录，其次项目根（兼容旧文件）。
+
+    Args:
+        filename: 绝对路径原样返回；带目录的相对路径按 resolve_path 处理；
+            纯文件名先在 output/ 下找，找不到再回落项目根。
+
+    Returns:
+        存在的文件路径；都不存在时返回 output/ 下的路径（供写操作使用）。
+    """
+    if os.path.isabs(filename):
+        return filename
+    if os.path.dirname(filename):
+        return resolve_path(filename)
+    in_output = output_path(filename)
+    if os.path.exists(in_output):
+        return in_output
+    legacy = resolve_path(filename)
+    if os.path.exists(legacy):
+        return legacy
+    return in_output
 
 
 def save_config_values(updates: Dict[str, Any]) -> None:

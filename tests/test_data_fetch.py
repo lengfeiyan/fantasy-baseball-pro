@@ -31,6 +31,13 @@ def test_safe_float_handles_mlb_format():
     assert _safe_float("-") is None
 
 
+def test_safe_float_preserves_negative_sign():
+    """回归 L3：负号必须保留（"-0.5" 不能变 0.5）。"""
+    assert _safe_float("-0.5") == -0.5
+    assert _safe_float("-.---") is None
+    assert _safe_float("---") is None
+
+
 def test_safe_int():
     assert _safe_int("55") == 55
     assert _safe_int(None) is None

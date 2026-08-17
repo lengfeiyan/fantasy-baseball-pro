@@ -59,7 +59,7 @@ def test_generate_rankings(tmpdir, fresh_conn, sample_hitters, sample_pitchers, 
     _seed_merged(fresh_conn, sample_hitters, sample_pitchers)
     out = str(tmpdir.join("rankings.csv"))
     monkeypatch.setattr(
-        "fantasy_baseball.core.scoring.resolve_path", lambda p: out
+        "fantasy_baseball.core.scoring.output_path", lambda p: out
     )
     sm = ScoringModel(conn=fresh_conn)
     path = sm.generate_rankings(out)

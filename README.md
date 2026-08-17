@@ -49,9 +49,9 @@ fbtool/
 │   ├── plugins/                   # 插件系统
 │   ├── gui/                       # 图形界面
 │   │   ├── app.py                 #   主窗口 + run_async
-│   │   └── tabs/                  #   13 个选项卡，直接 import
+│   │   └── tabs/                  #   10 个选项卡，直接 import
 │   └── utils/                     # 日志等
-├── tests/                         # 单元测试（48 个）
+├── tests/                         # 单元测试（138 个）
 ├── config.yaml                    # 配置文件（核心）
 ├── data/                          # 输入 CSV
 ├── legacy/                        # 旧版脚本（已归档，仅供参考）
@@ -78,7 +78,7 @@ export PYTHONPATH=src   # Windows: set PYTHONPATH=src
 **预测数据会自动从网络获取**（FantasyPros，聚合 Steamer/ZiPS/THE BAT X/ATC）：
 
 ```bash
-python -m fantasy_baseball fetch-projections --season 2026
+python -m fantasy_baseball fetch-projections
 ```
 
 这会抓取 800+ 打者 + 900+ 投手的真实预测，同时自动填充位置映射。无需手动下载任何 CSV。
@@ -93,14 +93,16 @@ python -m fantasy_baseball          # 启动图形界面
 fantasy-baseball gui                # 安装后可用
 ```
 
-13 个选项卡：首页 / 数据管理 / 配置 / 分析流水线 / 选秀模拟 / 阵容验证 /
-Sleeper 挖掘 / 蒙特卡洛模拟 / FA 分析 / Statcast / 伤病 / 插件 / 帮助。
+10 个选项卡：首页 / 数据管理 / 配置设置 / 分析流水线 / 选秀中心 / 阵容验证 /
+Sleeper 挖掘 / FA 分析 / 数据探索 / 插件管理。
+
+排名 CSV、选秀日志、FA 导出统一输出到 `output/` 目录。
 
 ### 使用命令行
 
 ```bash
 # 完整流水线（推荐：网络自动获取）
-python -m fantasy_baseball fetch-projections --season 2026  # 1. 抓取真实预测
+python -m fantasy_baseball fetch-projections  # 1. 抓取真实预测（--season 可省略，默认当前赛季）
 python -m fantasy_baseball rank            # 2. 生成 VORP 排名
 python -m fantasy_baseball adp             # 3. 准备 ADP
 
@@ -113,7 +115,7 @@ python -m fantasy_baseball simulate --user-pick 5 --min-availability 0.25
 
 # 其他
 python -m fantasy_baseball sleeper --min-adp 80 --max-adp 300
-python -m fantasy_baseball validate draft_log_pick5_balanced.csv --analyze
+python -m fantasy_baseball validate output/draft_log_pick5_balanced.csv --analyze
 python -m fantasy_baseball fa update-fa     # 更新 FA 池
 python -m fantasy_baseball fa recommend     # 生成 FA 推荐
 ```

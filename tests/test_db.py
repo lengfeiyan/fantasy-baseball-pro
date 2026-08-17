@@ -60,6 +60,7 @@ def test_fa_repository_pool(fresh_conn):
     ])
     df = repo.get_pool()
     assert len(df) == 2
+    assert repo.count() == 2
 
     # 按位置筛选
     of_df = repo.get_pool(position="OF")

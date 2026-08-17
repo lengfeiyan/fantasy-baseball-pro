@@ -167,6 +167,26 @@ class TestTabModules:
         finally:
             root.destroy()
 
+    def test_config_tab(self):
+        import tkinter as tk
+        from fantasy_baseball.gui.tabs import config_tab
+        root = tk.Tk(); root.withdraw()
+        frame = tk.Frame(root)
+        try:
+            config_tab.create_tab(frame, None)
+        finally:
+            root.destroy()
+
+    def test_analysis_tab(self):
+        import tkinter as tk
+        from fantasy_baseball.gui.tabs import analysis
+        root = tk.Tk(); root.withdraw()
+        frame = tk.Frame(root)
+        try:
+            analysis.create_tab(frame, None)
+        finally:
+            root.destroy()
+
     def test_fa_tab(self):
         import tkinter as tk
         from fantasy_baseball.gui.tabs import fa_tab

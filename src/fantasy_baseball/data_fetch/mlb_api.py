@@ -330,11 +330,18 @@ class MLBStatsClient:
 
 # -------------------------------------------------------------- 辅助函数
 def _safe_float(v) -> Optional[float]:
-    """安全转 float（处理 '.282' 这种 MLB 格式）。"""
-    if v is None or v == "" or v == "-":
+    """安全转 float（处理 MLB 的 "-"/"-.---" 缺失占位符，保留负号）。
+
+    修复 L3：原实现 ``str(v).replace("-", "")`` 会把负数的负号一并剥掉
+    （"-0.5" 变 0.5，导致 ERA 差值为负等场景全部算错）。
+    """
+    if v is None:
+        return None
+    s = str(v).strip()
+    if s in ("", "-", "-.---", "---", "nan", "None"):
         return None
     try:
-        return float(str(v).replace("-", ""))
+        return float(s)
     except (ValueError, TypeError):
         return None
 

@@ -10,8 +10,9 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
+from ...config import current_season
 from ...core import DataIngestor
-from ...db import PlayerRepository, db_session
+from ...db import FaRepository, InjuryRepository, PlayerRepository, RosterRepository, db_session
 from ._widgets import action_button, labeled_input, section_frame, set_text, text_display
 
 
@@ -26,7 +27,7 @@ def create_tab(parent: tk.Widget, app) -> None:
         ),
         justify=tk.LEFT,
     ).pack(anchor=tk.W)
-    _, season_var = labeled_input(web_frame, "赛季", "2026", width=8)
+    _, season_var = labeled_input(web_frame, "赛季", str(current_season()), width=8)
 
     # CSV 导入区
     csv_frame = section_frame(parent, "从本地 CSV 导入（离线备选）")
@@ -34,7 +35,8 @@ def create_tab(parent: tk.Widget, app) -> None:
         csv_frame,
         text=(
             "把 CSV 放到 data/ 目录（文件名遵循 config.yaml 配置）：\n"
-            "  data/hitters_2026_steamer.csv / data/pitchers_2026_steamer.csv\n"
+            f"  data/hitters_{current_season()}_steamer.csv / "
+            f"data/pitchers_{current_season()}_steamer.csv\n"
             "  data/player_positions_2025.csv（位置映射，网络获取时不需要）"
         ),
         justify=tk.LEFT,
@@ -77,6 +79,10 @@ def create_tab(parent: tk.Widget, app) -> None:
     def do_status():
         with db_session() as conn:
             counts = PlayerRepository(conn).count()
+            # 修复 L7：查看状态补充 FA/伤病/阵容表行数
+            counts["fa_pool"] = FaRepository(conn).count()
+            counts["injury_reports"] = InjuryRepository(conn).count()
+            counts["user_roster"] = RosterRepository(conn).count()
         set_text(output, f"当前数据库各表行数：\n{counts}")
         app.set_status("已刷新")
 

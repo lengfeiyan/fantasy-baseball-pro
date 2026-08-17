@@ -100,8 +100,8 @@ def create_tab(parent: tk.Widget, app) -> None:
         def _work():
             app.post("从选秀日志导入阵容...")
             import os
-            from ...config import resolve_path
-            path = resolve_path(log_path) if not os.path.isabs(log_path) else log_path
+            from ...config import find_output_file
+            path = find_output_file(log_path)
             if not os.path.exists(path):
                 raise FileNotFoundError(f"文件不存在: {path}")
 

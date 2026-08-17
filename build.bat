@@ -33,6 +33,7 @@ echo.
 echo   注意: 运行时需要以下文件在 exe 旁边:
 echo     - config.yaml（已自动打包）
 echo     - data\ 目录（已自动打包）
-echo   首次运行会自动创建 fantasy_baseball.db 和 logs\
+echo     - USER_GUIDE.md 使用说明（已自动打包）
+echo   首次运行会自动创建 fantasy_baseball.db 和 logs\、output\
 echo.
 pause

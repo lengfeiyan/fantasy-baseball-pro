@@ -6,7 +6,7 @@ import os
 import tkinter as tk
 from tkinter import ttk
 
-from ...config import resolve_path
+from ...config import find_output_file, get_season
 from ...core import ADPCache, DataIngestor, ScoringModel
 from ._widgets import (
     action_button,
@@ -104,17 +104,17 @@ def create_tab(parent: tk.Widget, app) -> None:
         import pandas as pd
         method = method_var.get()
         if method == "sgp":
-            rank_file = "fantasy_draft_rankings_sgp_2026.csv"
+            rank_file = f"fantasy_draft_rankings_sgp_{get_season()}.csv"
             value_col = "sgp_total"
             rank_col = "sgp_rank"
             title = "SGP"
         else:
-            rank_file = "fantasy_draft_rankings_vorp_2026.csv"
+            rank_file = f"fantasy_draft_rankings_vorp_{get_season()}.csv"
             value_col = "vorp"
             rank_col = "rank"
             title = "VORP"
 
-        rank_path = resolve_path(rank_file)
+        rank_path = find_output_file(rank_file)
         if not os.path.exists(rank_path):
             set_text(output, f"排名文件不存在：{rank_file}\n请先点击「生成排名」。")
             return

@@ -80,8 +80,11 @@ class ScoringModel:
         # 固定球员数 = 被选数 - stream 分摊
         fixed = max(1, drafted - stream_this_pos)
 
-        # 分位数 = 固定球员数 / 总球员数
-        q = fixed / total_players
+        # 分位数方向（修复审计高危项）：替代水平 = 固定被选球员中的最后一名
+        # （分数降序第 fixed 名），对应升序分位点 1 - fixed/total。
+        # 旧实现 q = fixed/total 取的是升序第 fixed 名（池内第 N 差的球员），
+        # 方向颠倒：中游球员 VORP 符号翻转，跨位置比较系统性失真。
+        q = 1.0 - fixed / total_players
         return max(0.10, min(0.90, q))
 
     # ------------------------------------------------------------------ VORP
@@ -194,11 +197,27 @@ class ScoringModel:
                     df.loc[mask, "vorp_upside"] = df.loc[mask, "vorp"] + std * self.risk_adjustment
                     df.loc[mask, "vorp_floor"] = df.loc[mask, "vorp"] - std * self.risk_adjustment
         elif self.risk_method == "historical_variance":
-            df["vorp_upside"] = df["vorp"] * (1 + self.risk_adjustment)
-            df["vorp_floor"] = df["vorp"] * (1 - self.risk_adjustment)
+            # 修复审计项：负 VORP 直接乘 (1±adj) 会让 upside < floor（方向反转）。
+            # 改为在 vorp 两侧对称展开 ±adj×|vorp|，正负值方向均正确
+            # （正值时与旧公式 vorp*(1±adj) 等价）。
+            spread = self.risk_adjustment * df["vorp"].abs()
+            df["vorp_upside"] = df["vorp"] + spread
+            df["vorp_floor"] = df["vorp"] - spread
         else:
-            df["vorp_upside"] = df["vorp"] * 1.1
-            df["vorp_floor"] = df["vorp"] * 0.9
+            spread = 0.1 * df["vorp"].abs()
+            df["vorp_upside"] = df["vorp"] + spread
+            df["vorp_floor"] = df["vorp"] - spread
+
+        # 单行组（std 无定义）回落到 ±10% 展开法，避免 NaN 写入排名 CSV
+        if "vorp_upside" not in df.columns:
+            df["vorp_upside"] = float("nan")
+        if "vorp_floor" not in df.columns:
+            df["vorp_floor"] = float("nan")
+        need = df["vorp_upside"].isna() | df["vorp_floor"].isna()
+        if need.any():
+            fallback = 0.1 * df.loc[need, "vorp"].abs()
+            df.loc[need, "vorp_upside"] = df.loc[need, "vorp"] + fallback
+            df.loc[need, "vorp_floor"] = df.loc[need, "vorp"] - fallback
 
         # floor 不为负
         if "vorp_floor" in df.columns:

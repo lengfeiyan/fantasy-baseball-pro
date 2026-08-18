@@ -56,14 +56,19 @@ def create_tab(parent: tk.Widget, app) -> None:
     btn_frame.pack(pady=8)
 
     def do_recommend():
+        # UI 线程先取值（Tk 变量不支持跨线程访问）
+        method = method_var.get()
+        pos_sel = pos_var.get()
+        top_s = top_var.get()
+        risk = risk_var.get()
+
         def _work():
-            method = method_var.get()
             app.post(f"生成 FA 推荐中（{method.upper()}）...")
             analyzer = FAAnalyzer(method=method)
             rec = RecommendationSystem(analyzer)
-            position = None if pos_var.get() == "All" else pos_var.get()
+            position = None if pos_sel == "All" else pos_sel
             result = rec.generate_recommendations(
-                position=position, top_n=int(top_var.get()), risk_preference=risk_var.get(),
+                position=position, top_n=int(top_s), risk_preference=risk,
                 cancel_check=app.is_cancelled,
             )
             if not result:
@@ -80,7 +85,7 @@ def create_tab(parent: tk.Widget, app) -> None:
                 roster_count = repo.count()
                 roster_df = repo.get_roster()
 
-            lines = [f"FA 推荐（{risk_var.get()}策略，Top {len(result)}）：\n", "-" * 60 + "\n"]
+            lines = [f"FA 推荐（{risk}策略，Top {len(result)}）：\n", "-" * 60 + "\n"]
             if roster_count == 0:
                 lines.append("[提示] 阵容未设置，推荐基于空阵容（所有位置都缺）。\n")
                 lines.append("去「阵容验证」选项卡导入阵容后，推荐会优先填补缺口位置。\n")
@@ -99,8 +104,9 @@ def create_tab(parent: tk.Widget, app) -> None:
                     lines.append("[阵容已满] 按综合价值排序推荐\n")
 
             for i, r in enumerate(result, 1):
+                mock_mark = "（示例数据）" if r.get("is_mock") else ""
                 lines.append(
-                    f"{i}. {r['name']} ({r['pos']})  得分={r['final_score']:.1f}  "
+                    f"{i}. {r['name']}{mock_mark} ({r['pos']})  得分={r['final_score']:.1f}  "
                     f"价值={r['value']['overall_value']:.1f}  需求={r['need_factor']:.2f}"
                 )
             return "\n".join(lines)
@@ -108,12 +114,18 @@ def create_tab(parent: tk.Widget, app) -> None:
         app.run_async(_work, on_done=lambda r: set_text(output, r), status="生成推荐...")
 
     def do_export():
+        # UI 线程先取值（Tk 变量不支持跨线程访问）
+        method = method_var.get()
+        pos_sel = pos_var.get()
+        top_s = top_var.get()
+        risk = risk_var.get()
+
         def _work():
-            analyzer = FAAnalyzer(method=method_var.get())
+            analyzer = FAAnalyzer(method=method)
             rec = RecommendationSystem(analyzer)
-            position = None if pos_var.get() == "All" else pos_var.get()
+            position = None if pos_sel == "All" else pos_sel
             result = rec.generate_recommendations(
-                position=position, top_n=int(top_var.get()), risk_preference=risk_var.get()
+                position=position, top_n=int(top_s), risk_preference=risk
             )
             if not result:
                 return None

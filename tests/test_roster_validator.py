@@ -74,3 +74,41 @@ def test_analyze_strength_with_pitchers(tmpdir):
     v = RosterValidator()
     strength = v.analyze_roster_strength(path)
     assert strength.hitter_pitcher_ratio == pytest.approx(2.0)
+
+
+# ============================================================
+# 全联盟日志的用户队过滤（审计高危项回归：旧实现拿 12 队日志对照单队槽位）
+# ============================================================
+def _full_league_log():
+    """两队的迷你全联盟日志，team 1 是用户（is_user_pick=True）。"""
+    return [
+        {"round": 1, "team": 1, "name": "U1", "pos": "OF", "vorp": 60, "is_user_pick": True},
+        {"round": 1, "team": 2, "name": "O1", "pos": "OF", "vorp": 55, "is_user_pick": False},
+        {"round": 2, "team": 1, "name": "U2", "pos": "SP", "vorp": 30, "is_user_pick": True},
+        {"round": 2, "team": 2, "name": "O2", "pos": "OF", "vorp": 50, "is_user_pick": False},
+        {"round": 3, "team": 1, "name": "U3", "pos": "C", "vorp": 20, "is_user_pick": True},
+        {"round": 3, "team": 2, "name": "O3", "pos": "OF", "vorp": 45, "is_user_pick": False},
+    ]
+
+
+def test_validate_filters_user_team_from_full_log(tmpdir):
+    """全联盟日志：位置计数只统计用户队，不再恒为「超编」。"""
+    path = _write_log(tmpdir, _full_league_log())
+    result = RosterValidator().validate_roster(path)
+    assert result.pos_counts == {"OF": 1, "SP": 1, "C": 1}
+
+
+def test_validate_explicit_team_id_overrides(tmpdir):
+    """显式 team_id 优先于 is_user_pick：可查看其他球队的阵容。"""
+    path = _write_log(tmpdir, _full_league_log())
+    result = RosterValidator().validate_roster(path, team_id=2)
+    assert result.pos_counts == {"OF": 3}
+
+
+def test_analyze_strength_scoped_to_user_team(tmpdir):
+    """强度分析只算用户队：总 VORP = 60+30+20，而非全联盟 260。"""
+    path = _write_log(tmpdir, _full_league_log())
+    strength = RosterValidator().analyze_roster_strength(path)
+    assert strength is not None
+    assert strength.total_vorp == pytest.approx(110.0)
+    assert strength.avg_vorp == pytest.approx(110.0 / 3)

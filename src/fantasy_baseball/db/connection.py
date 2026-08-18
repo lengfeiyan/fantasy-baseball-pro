@@ -44,7 +44,9 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
         sqlite3.Connection，row_factory 已设为 Row，支持按列名访问。
     """
     path = db_path if db_path is not None else get_db_path()
-    conn = sqlite3.connect(path, check_same_thread=False)
+    # timeout=30：SQLite busy 等待从默认 5s 提到 30s，缓解 GUI 多线程
+    # 并发 db_session 时偶发的 "database is locked"
+    conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     create_all_tables(conn)

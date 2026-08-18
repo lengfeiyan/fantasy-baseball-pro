@@ -301,6 +301,11 @@ class DraftEngine:
             df = df.rename(columns={"fantasy_points": "vorp"})
         # 确定排序基准列：SGP 模式优先用 sgp_total，否则用 vorp
         rank_col = "sgp_total" if (self.method == "sgp" and "sgp_total" in df.columns) else "vorp"
+        # 修复审计项：SGP 池没有 vorp 列，simulate_draft 的内部数组与结果
+        # 构建直接读 df["vorp"] → KeyError 'vorp'。为内部计算别名
+        # vorp = sgp_total（结果输出时按 method 还原列名）。
+        if self.method == "sgp" and "vorp" not in df.columns and "sgp_total" in df.columns:
+            df["vorp"] = df["sgp_total"]
         # 缺 adp 列或全是默认值 999 → 用排名反推估算 ADP
         if "adp" not in df.columns or df["adp"].fillna(999).max() == 999:
             value_rank = df[rank_col].fillna(0).rank(method="first", ascending=False)
@@ -362,6 +367,9 @@ class DraftEngine:
             picksums_orig[orig_idx] = pick_sums[i]
 
         result = df[["name", "pos", "vorp", "adp"]].copy()
+        # SGP 模式的价值列还原为 sgp_total（与 analyze_availability 一致）
+        if self.method == "sgp" and "sgp_total" in df.columns:
+            result = result.rename(columns={"vorp": "sgp_total"})
         result["times_drafted"] = counts_orig
         result["draft_rate"] = counts_orig / iterations if iterations > 0 else 0
         result["avg_pick"] = np.where(

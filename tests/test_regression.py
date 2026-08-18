@@ -44,16 +44,16 @@ EXPECTED_SCORES = {
     "CloserRP": 47.90, "SetupRP": 39.40,
 }
 
-# 动态替代水平（基于 league_size × (slots - stream_slots)）后的参考值
+# 动态替代水平（基于 league_size × (slots - stream_slots)）后的参考值。
+# 2026-08-18 重新生成：修复了替代水平分位数方向颠倒的 bug（旧值由错误算法产生，
+# 方向修复后中游球员 VORP 显著抬升，小池中游球员如 MidOF/MidSP 转为正）。
 EXPECTED_VORPS = {
-    "StarOF": 15.41, "StarSS": 12.81, "Star1B": 10.90,
-    "MidOF": -61.62,
-    "AceSP": 2.16, "MidSP": -8.64, "WeakSP": -17.54,
-    "CloserRP": 0.85, "SetupRP": -7.65,
-    "Weak1B": -98.13, "WeakSS": -115.24, "WeakOF": -146.65,
+    "StarOF": 145.05, "StarSS": 115.24, "Star1B": 98.13,
+    "MidOF": 68.02,
+    "AceSP": 17.92, "MidSP": 7.12, "WeakSP": -1.78,
+    "CloserRP": 7.65, "SetupRP": -0.85,
+    "Weak1B": -10.90, "WeakSS": -12.81, "WeakOF": -17.01,
 }
-
-# 打者按位置 25 分位数作替代水平；投手按全体 25 分位数
 
 
 @pytest.fixture
@@ -114,10 +114,12 @@ class TestVorpRegression:
         row = seeded_rankings[seeded_rankings["name"] == "AceSP"].iloc[0]
         assert row["vorp"] == pytest.approx(EXPECTED_VORPS["AceSP"], abs=0.5)
 
-    def test_mid_sp_vorp_negative(self, seeded_rankings):
-        """MidSP 的 VORP 应为负（动态替代水平后，只有 AceSP 高于替代线）。"""
+    def test_mid_sp_above_replacement(self, seeded_rankings):
+        """方向修复回归：本池仅 3 名 SP（全部会被 12 队联赛选走），
+        替代水平贴近池内最差者，中游投手应在替代线之上（VORP > 0）。
+        旧算法方向颠倒时此处曾为负。"""
         row = seeded_rankings[seeded_rankings["name"] == "MidSP"].iloc[0]
-        assert row["vorp"] < 0
+        assert row["vorp"] > 0
 
     def test_weak_players_negative_vorp(self, seeded_rankings):
         """弱于替代水平的球员 VORP 为负。"""

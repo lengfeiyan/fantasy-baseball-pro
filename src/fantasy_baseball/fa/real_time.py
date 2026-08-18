@@ -99,9 +99,10 @@ class RealTimeData:
         except Exception as e:
             logger.warning("MLB 统计获取失败 (id=%d)，降级 mock: %s", player_id, e)
 
-        # 3. mock 降级
+        # 3. mock 降级（标注 is_mock，上层可区分"示例数据"与真实数据）
         logger.info("使用 mock 统计数据 (player_id=%d)", player_id)
         mock = _mock_player_stats(player_id)
+        mock["is_mock"] = True
         return mock
 
     def _fetch_statcast_safely(self, player_id: int, pos: str) -> Dict[str, Any]:

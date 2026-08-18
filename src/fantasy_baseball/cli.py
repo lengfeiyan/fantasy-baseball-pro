@@ -199,7 +199,7 @@ def _cmd_validate(args) -> int:
     from .core import RosterValidator
 
     v = RosterValidator()
-    result = v.validate_roster(args.draft_log)
+    result = v.validate_roster(args.draft_log, team_id=args.team)
     print("阵容合规性检查：")
     print("-" * 50)
     for pos, required in result.slot_requirements.items():
@@ -213,7 +213,7 @@ def _cmd_validate(args) -> int:
     print("\n" + ("阵容合规！" if result.is_valid else "阵容需要调整"))
 
     if args.analyze:
-        strength = v.analyze_roster_strength(args.draft_log)
+        strength = v.analyze_roster_strength(args.draft_log, team_id=args.team)
         if strength:
             print("\n阵容强度：")
             print("-" * 50)
@@ -234,6 +234,14 @@ def _cmd_fa(args) -> int:
         print(f"[完成] 伤病数据已更新（{len(injuries)} 条，回溯 {args.days_back} 天）")
         return 0
     if args.action == "import-pool":
+        # 修复审计项：不带 --file 时曾对项目根目录 read_csv 抛原始异常
+        import os
+        from .config import resolve_path
+        file_path = args.file if os.path.isabs(args.file) else resolve_path(args.file)
+        if not args.file or not os.path.isfile(file_path):
+            print(f"[错误] 请指定有效的 CSV 文件：fa import-pool <file>")
+            print("CSV 格式：player_id,name,team,pos,status")
+            return 1
         n = RealTimeData().import_data_from_file(args.file, "fa_pool")
         if n == 0:
             print("[错误] 导入失败：文件不存在或格式不正确")
@@ -386,6 +394,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("validate", help="阵容验证")
     p.add_argument("draft_log", help="选秀日志文件路径")
     p.add_argument("--analyze", action="store_true", help="分析阵容强度")
+    p.add_argument("--team", type=int, default=None,
+                   help="你的球队编号（日志无 is_user_pick 列时用于过滤；默认自动识别）")
     p.set_defaults(func=_cmd_validate)
 
     # roster

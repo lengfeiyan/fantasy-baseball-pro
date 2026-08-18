@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import sqlite3
 
+from ..utils.logger import get_logger
+
+logger = get_logger("db.schema")
+
 # 打者原始预测（多源时每源一行，含 source 列）
 HITTERS_SQL = """
 CREATE TABLE IF NOT EXISTS hitters (
@@ -16,6 +20,7 @@ CREATE TABLE IF NOT EXISTS hitters (
     name TEXT NOT NULL,
     team TEXT,
     pos TEXT,
+    eligible_pos TEXT,
     source TEXT,
     R REAL, HR REAL, RBI REAL, SB REAL,
     AVG REAL, OBP REAL, SLG REAL, OPS REAL, PA REAL,
@@ -57,6 +62,7 @@ CREATE TABLE IF NOT EXISTS hitters_merged (
     name TEXT UNIQUE,
     team TEXT,
     pos TEXT,
+    eligible_pos TEXT,
     R REAL, HR REAL, RBI REAL, SB REAL,
     AVG REAL, OBP REAL, SLG REAL, OPS REAL, PA REAL,
     AB REAL, H REAL, "2B" REAL, "3B" REAL, BB REAL, SO REAL,
@@ -106,7 +112,9 @@ CREATE TABLE IF NOT EXISTS player_season_stats (
 )
 """
 
-# 用户阵容
+# 用户阵容（player_id 为独立标识，不强引用 hitters——修复审计高危项：
+# 旧版保留的 FOREIGN KEY 让"去外键迁移"判据永远为真，每次打开连接都
+# DROP+重建该表；恢复时外键违反的行被静默丢弃，造成永久数据丢失）
 USER_ROSTER_SQL = """
 CREATE TABLE IF NOT EXISTS user_roster (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,8 +123,7 @@ CREATE TABLE IF NOT EXISTS user_roster (
     team TEXT,
     pos TEXT,
     status TEXT,
-    acquisition_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (player_id) REFERENCES hitters(id) ON DELETE SET NULL
+    acquisition_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 """
 
@@ -209,6 +216,19 @@ def _add_sgp_columns(conn: sqlite3.Connection) -> None:
                 except sqlite3.OperationalError:
                     pass  # 列已存在（并发情况）
 
+    # eligible_pos（多位置资格，"2B,SS" 逗号分隔）——projections 计算该列，
+    # scoring 的多位置 VORP 依赖它（修复审计项：此前从未入库，该逻辑是死代码）
+    for table in ("hitters", "hitters_merged"):
+        try:
+            existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        except sqlite3.Error:
+            continue
+        if existing and "eligible_pos" not in existing:
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN eligible_pos TEXT")
+            except sqlite3.OperationalError:
+                pass
+
 
 def _migrate_legacy_fk_tables(conn: sqlite3.Connection) -> None:
     """检测并重建旧版带外键的表（改为无外键的新 schema）。
@@ -273,6 +293,7 @@ def _restore_migrated_data(conn: sqlite3.Connection) -> None:
             continue
         placeholders = ",".join("?" * len(valid_cols))
         col_list = ",".join(valid_cols)
+        failed = 0
         for record in data:
             values = [record.get(c) for c in valid_cols]
             try:
@@ -280,8 +301,14 @@ def _restore_migrated_data(conn: sqlite3.Connection) -> None:
                     f"INSERT OR IGNORE INTO {table} ({col_list}) VALUES ({placeholders})",
                     values,
                 )
-            except sqlite3.Error:
-                pass
+            except sqlite3.Error as e:
+                # 修复审计项：不再静默吞错——失败的行会永久丢失，必须留痕
+                failed += 1
+                logger.warning(
+                    "迁移恢复 %s 失败一行（数据: %s）: %s", table, record, e
+                )
+        if failed:
+            logger.warning("表 %s 迁移恢复完成：%d/%d 行失败被跳过", table, failed, len(data))
     conn.execute("DROP TABLE IF EXISTS _migration_backup")
 
 

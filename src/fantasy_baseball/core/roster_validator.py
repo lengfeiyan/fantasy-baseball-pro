@@ -52,8 +52,37 @@ class RosterValidator:
         cfg = get_config()
         self.roster_slots = cfg["league"]["roster_slots"]
 
-    def validate_roster(self, draft_log_file: str) -> ValidationResult:
-        """验证选秀日志中的阵容是否合规。"""
+    @staticmethod
+    def _filter_user_team(
+        draft_log: pd.DataFrame, team_id: Optional[int]
+    ) -> pd.DataFrame:
+        """从（可能是全联盟的）选秀日志中提取用户单队阵容。
+
+        修复审计高危项：旧实现拿完整选秀日志（12 队 × 15 轮 ≈ 180 行）直接
+        统计位置计数并对照**单队**槽位，结果恒为「超编几十人」；
+        强度分析同样是全联盟口径而非用户 15 人阵容。
+
+        提取优先级：显式 team_id 参数 → ``is_user_pick`` 列 → 原样返回
+        （视为单队日志，兼容手动裁剪/旧格式日志）。
+        """
+        if team_id is not None and "team" in draft_log.columns:
+            return draft_log[draft_log["team"] == team_id]
+        if "is_user_pick" in draft_log.columns:
+            user_df = draft_log[draft_log["is_user_pick"] == True]  # noqa: E712
+            if not user_df.empty:
+                return user_df
+        return draft_log
+
+    def validate_roster(
+        self, draft_log_file: str, team_id: Optional[int] = None
+    ) -> ValidationResult:
+        """验证选秀日志中的阵容是否合规。
+
+        Args:
+            draft_log_file: 选秀日志 CSV 路径。全联盟日志会自动按
+                ``is_user_pick`` 列过滤出用户单队（也可用 team_id 显式指定）。
+            team_id: 用户球队编号（日志 team 列的值），None 则自动识别。
+        """
         draft_log = self._load(draft_log_file)
         if draft_log is None:
             return ValidationResult(
@@ -63,6 +92,7 @@ class RosterValidator:
                 issues=["无法读取选秀日志文件"],
             )
 
+        draft_log = self._filter_user_team(draft_log, team_id)
         pos_counts = draft_log["pos"].value_counts().to_dict()
         issues: List[str] = []
         suggestions: List[str] = []
@@ -94,11 +124,19 @@ class RosterValidator:
             suggestions=suggestions,
         )
 
-    def analyze_roster_strength(self, draft_log_file: str) -> Optional[StrengthResult]:
-        """分析阵容强度（修复旧版除零 bug 与 L4：SGP 日志 vorp 全 0）。"""
+    def analyze_roster_strength(
+        self, draft_log_file: str, team_id: Optional[int] = None
+    ) -> Optional[StrengthResult]:
+        """分析阵容强度（修复旧版除零 bug、L4 的 vorp 全 0、以及全联盟口径）。
+
+        Args:
+            draft_log_file: 选秀日志 CSV 路径（全联盟日志自动过滤出用户单队）。
+            team_id: 用户球队编号，None 则按 ``is_user_pick`` 列自动识别。
+        """
         draft_log = self._load(draft_log_file)
         if draft_log is None or "vorp" not in draft_log.columns:
             return None
+        draft_log = self._filter_user_team(draft_log, team_id)
 
         # 修复 L4：旧版 SGP 日志 vorp 列全 0，改用 sgp_total 计算强度
         value_col = "vorp"

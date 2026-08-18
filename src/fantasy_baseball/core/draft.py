@@ -21,6 +21,12 @@ logger = get_logger("draft")
 
 VALUE_PICK_THRESHOLD = 5  # ADP 低于预期顺位超过此值视为价值股
 
+# 联盟典型团队赛季总量（12 队经验值），用于类别平衡的跨量纲归一化
+_CAT_TYPICAL_TOTAL = {
+    "R": 1000.0, "HR": 250.0, "RBI": 1000.0, "SB": 120.0,
+    "W": 75.0, "SV": 60.0, "K": 1300.0, "ERA": 3.8, "WHIP": 1.25,
+}
+
 
 class SnakeDraftSimulator:
     """单次蛇形选秀模拟器。"""
@@ -198,24 +204,35 @@ class SnakeDraftSimulator:
         pos = player.get("pos", "")
         bonus = 0.0
 
-        # 打者：看 HR/SB/R/RBI 是否偏科
+        # 打者：看 HR/SB/R/RBI 是否偏科。
+        # 修复审计项：R/RBI（~1000）与 SB（~80）原始值不可比，旧逻辑恒把
+        # R/RBI 当最强、SB/HR 当最弱。先按联盟典型团队总量归一化再比较。
         if pos not in ("SP", "RP"):
             cat_values = []
             for s in hitter_stats:
                 val = player.get(s)
                 if val is not None:
                     try:
-                        cat_values.append((s, float(val)))
+                        cat_values.append(
+                            (s, float(val) / _CAT_TYPICAL_TOTAL.get(s, 1.0))
+                        )
                     except (ValueError, TypeError):
                         pass
             if cat_values and len(cat_values) >= 2:
-                # 找阵容最弱的类别
-                weakest = min(cat_totals.get(s, 0) for s, _ in cat_values)
-                strongest = max(cat_totals.get(s, 0) for s, _ in cat_values)
+                # 找阵容最弱的类别（同样按归一化值比较）
+                weakest = min(
+                    cat_totals.get(s, 0) / _CAT_TYPICAL_TOTAL.get(s, 1.0)
+                    for s, _ in cat_values
+                )
+                strongest = max(
+                    cat_totals.get(s, 0) / _CAT_TYPICAL_TOTAL.get(s, 1.0)
+                    for s, _ in cat_values
+                )
                 if strongest > 0 and weakest < strongest * 0.5:
                     # 阵容偏科：给在弱类上有贡献的球员 bonus
                     for s, val in cat_values:
-                        if cat_totals.get(s, 0) == weakest and val > 0:
+                        weakest_norm = cat_totals.get(s, 0) / _CAT_TYPICAL_TOTAL.get(s, 1.0)
+                        if weakest_norm == weakest and val > 0:
                             bonus += val * 0.02  # 轻量 bonus
 
         return min(bonus, 15.0)  # 上限 15 分，避免压过 VORP
@@ -237,8 +254,14 @@ class SnakeDraftSimulator:
         return int(hit.iloc[0]["adp"]) if not hit.empty else None
 
     def _is_value_pick(self, total_pick: int, name: str) -> bool:
-        """判断是否为价值股（实际顺位远低于 ADP）。"""
+        """判断是否为价值股：ADP 远好于实际选中顺位（球员滑落到你手里）。
+
+        修复审计高危项：旧实现 (adp - total_pick) > 阈值 方向相反——
+        把「提前抢人（reach）」标成价值股，真正的滑落者反而不标。
+        正确方向：total_pick - adp > 阈值。例：ADP=100 的球员在第 115
+        顺位被选中（滑落 15 检）→ 价值股；第 85 顺位抢走 → reach，非价值股。
+        """
         if not self.show_value_picks:
             return False
         adp = self._player_adp(name)
-        return adp is not None and (adp - total_pick) > VALUE_PICK_THRESHOLD
+        return adp is not None and (total_pick - adp) > VALUE_PICK_THRESHOLD

@@ -15,7 +15,8 @@ from __future__ import annotations
 import copy
 import datetime
 import os
-from typing import Any, Dict, Optional
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -233,48 +234,86 @@ def find_output_file(filename: str) -> str:
     return in_output
 
 
-def save_config_values(updates: Dict[str, Any]) -> None:
+def _index_config_line_paths(lines: List[str]) -> Dict[int, str]:
+    """给配置文件的每个「键定义行」标注完整点分路径。
+
+    通过缩进栈推断层级（不依赖固定 2 空格约定）；列表项（``- `` 开头）、
+    空行、注释行不定义键。返回 ``{行号: "a.b.c"}``。
+    """
+    result: Dict[int, str] = {}
+    stack: List[Tuple[int, str]] = []  # [(缩进列数, 键名)]
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("- "):
+            continue
+        m = re.match(r"^([\w\-\.]+)\s*:", stripped)
+        if not m:
+            continue
+        key = m.group(1)
+        indent = len(line) - len(stripped)
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        stack.append((indent, key))
+        result[i] = ".".join(k for _, k in stack)
+    return result
+
+
+def save_config_values(updates: Dict[str, Any]) -> List[str]:
     """更新 config.yaml 中指定路径的值，保留注释和原有结构。
 
     用逐行文本替换而非 yaml.safe_dump，确保用户的注释不丢失。
 
+    修复审计高危项：旧实现只按「key 名 + 缩进」匹配行、first-match-wins，
+    不区分所在段落——``league.scoring.hitters.R`` 与
+    ``sgp.denominators.hitters.R`` 同名同缩进（6 空格），league 段在文件前面，
+    SGP 分母的更新会把 league 评分权重行改写（R: 1 → 24.6）。
+    现按行的完整点分路径精确匹配。
+
     Args:
         updates: 点分路径 → 新值。如 {"league.size": 14, "league.scoring.hitters.HR": 2}
+
+    Returns:
+        未在文件中找到对应行的路径列表（调用方可据此提示用户），全部命中时为空。
     """
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
+    line_paths = _index_config_line_paths(lines)
+    unmatched: List[str] = []
     for path, value in updates.items():
-        keys = path.split(".")
-        final_key = keys[-1]
-        # 计算目标缩进：每个层级 2 空格（YAML 惯例）
-        target_indent = "  " * len(keys[:-1]) if len(keys) > 1 else ""
+        target = next((i for i, dotted in line_paths.items() if dotted == path), None)
+        if target is None:
+            unmatched.append(path)
+            continue
 
-        for i, line in enumerate(lines):
-            stripped = line.lstrip()
-            # 匹配 "key:" 或 "key: value"
-            if stripped.startswith(f"{final_key}:") or stripped.startswith(f"{final_key} :"):
-                actual_indent = line[: len(line) - len(stripped)]
-                if actual_indent == target_indent:
-                    # 保留行尾注释（# 之后的部分）
-                    comment = ""
-                    comment_pos = line.find("#")
-                    if comment_pos >= 0:
-                        comment = "  " + line[comment_pos:].rstrip()
+        line = lines[target]
+        stripped = line.lstrip()
+        indent = line[: len(line) - len(stripped)]
+        final_key = path.split(".")[-1]
+        # 保留行尾注释。YAML 约定 # 前须有空格才构成注释，按 " #" 切分
+        # 可避免误切 URL 等值内的 #。
+        comment = ""
+        pos = line.find(" #")
+        if pos >= 0:
+            comment = "  " + line[pos:].rstrip()
 
-                    # 格式化新值
-                    if isinstance(value, str):
-                        formatted = f'{final_key}: "{value}"'
-                    elif isinstance(value, bool):
-                        formatted = f"{final_key}: {str(value).lower()}"
-                    else:
-                        formatted = f"{final_key}: {value}"
-                    lines[i] = f"{target_indent}{formatted}{comment}\n"
-                    break
+        # 格式化新值（字符串转义引号与反斜杠，防止写出非法 YAML）
+        if isinstance(value, str):
+            escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+            formatted = f'{final_key}: "{escaped}"'
+        elif isinstance(value, bool):
+            formatted = f"{final_key}: {str(value).lower()}"
+        else:
+            formatted = f"{final_key}: {value}"
+        lines[target] = f"{indent}{formatted}{comment}\n"
 
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         f.writelines(lines)
 
+    if unmatched:
+        logger.warning("以下配置路径在 config.yaml 中未找到，未更新: %s", unmatched)
+
     # 失效缓存
     global _cache
     _cache = None
+    return unmatched

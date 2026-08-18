@@ -280,7 +280,12 @@ class MLBStatsClient:
         )
         data = _http_get_json(url, timeout=30)
         if not data:
-            return []
+            # 修复审计项：网络失败与"该时段无伤病"此前都返回 []，上层
+            # real_time 的 RuntimeError 分支永远不可达，GUI 把断网当无伤病。
+            raise RuntimeError(
+                f"无法访问 MLB Stats API（伤病数据 {start_date}~{end_date}），"
+                "请检查网络后重试"
+            )
 
         txns = data.get("transactions", [])
         injuries = []
@@ -383,15 +388,20 @@ def _parse_injury_transaction(t: dict) -> Optional[Dict[str, Any]]:
     if not name:
         return None
 
-    # 解析球队名（句首到 placed/reinstated 等动词之前）
+    # 解析球队名（句首到动词之前）。
+    # 修复审计项：动词列表缺 activated/transferred——激活记录（39/110 实测）
+    # 全部解析出空队名。
     team_match = re.match(
-        r"^(.+?)\s+(?:placed|reinstated|signed|optioned|recalled|selected|claimed|designated)\b",
+        r"^(.+?)\s+(?:placed|reinstated|activated|transferred|signed|optioned|recalled|selected|claimed|designated|released)\b",
         desc,
     )
     team = team_match.group(1).strip() if team_match else ""
 
-    # 解析伤病天数 → severity
-    days_match = re.search(r"(\d+)-day", desc)
+    # 解析伤病天数 → severity。
+    # 修复审计项：转会记录（"from the 10-day ... to the 60-day injured list"）
+    # 旧实现取第一个匹配 = 转出名单天数，60 天转会被降级成 mild；
+    # 现优先取 "to the N-day"（转入名单），无转入时回落首个匹配。
+    days_match = re.search(r"to the (\d+)-day", desc) or re.search(r"(\d+)-day", desc)
     days = days_match.group(1) if days_match else None
     severity = _INJURY_DAYS_TO_SEVERITY.get(days or "", "mild")
 
@@ -409,8 +419,12 @@ def _parse_injury_transaction(t: dict) -> Optional[Dict[str, Any]]:
         itype = re.split(r"\s+(?:retroactive|effective|sideways)", itype, flags=re.I)[0].strip()
         injury_type = itype if itype else ""
 
-    # 状态：reinstated → recovered，否则 day-to-day/IL
-    status = "recovered" if "reinstated" in desc.lower() else "IL"
+    # 状态：复出 → recovered，否则 IL。
+    # 修复审计项：MLB 实际用 "activated X from the N-day injured list" 表达
+    # 复出（实测 110 条 IL 记录中 "reinstated" 出现 0 次），旧实现只认
+    # reinstated → 伤病惩罚永不解除，刚复出的健康球员持续按重伤扣分。
+    lower = desc.lower()
+    status = "recovered" if ("reinstated" in lower or "activated" in lower) else "IL"
 
     return {
         "player_id": pid,

@@ -16,8 +16,10 @@ from .real_time import RealTimeData
 
 logger = get_logger("fa.analyzer")
 
-# 含具体外野位置（MLB API 返回 CF/RF/LF 而非 OF），内部统一归一化为 OF
-HITTER_POSITIONS = {"C", "1B", "2B", "3B", "SS", "OF", "LF", "CF", "RF", "DH"}
+# 含具体外野位置（MLB API 返回 CF/RF/LF 而非 OF），内部统一归一化为 OF。
+# 修复审计项：DH 归一化映射到 UTIL，但集合里没有 UTIL → 专职 DH（Stanton 等）
+# 落出两个分支，base_score/statcast_score 全为 0。归一化后的目标位置必须都在集合内。
+HITTER_POSITIONS = {"C", "1B", "2B", "3B", "SS", "OF", "UTIL", "LF", "CF", "RF", "DH"}
 PITCHER_POSITIONS = {"SP", "RP", "P"}
 
 # 位置归一化映射（具体外野 → OF）
@@ -104,6 +106,8 @@ class FAAnalyzer:
             "position_adjusted_value": position_adjusted,
             "statcast_score": statcast_score,
             "overall_value": overall,
+            # 真实数据不可用时降级到 mock 统计（real_time 标注），上层展示时提示
+            "is_mock": bool(stats.get("is_mock", False)),
         }
 
     def _calculate_base_score(self, player_stats: Dict[str, Any]) -> float:
@@ -135,7 +139,11 @@ class FAAnalyzer:
             weights = {}
         for stat, weight in weights.items():
             if stat in stats:
-                score += stats[stat] * weight
+                # 修复审计项：MLB API 用 "-"/"---" 占位时值为 None，
+                # 直接相乘抛 TypeError → 该球员在推荐循环里被静默丢弃。
+                val = _safe_f(stats[stat])
+                if val is not None:
+                    score += val * weight
         return score
 
     def _calculate_trend_score(self, player_id: int, player_stats: Dict[str, Any]) -> float:
@@ -202,24 +210,29 @@ class FAAnalyzer:
             return 0.0
         pos = player_stats.get("pos", "")
         if pos in HITTER_POSITIONS:
-            score = (
-                sc.get("xwOBA", 0) * 300
-                + sc.get("barrel_rate", 0) * 100
-                + sc.get("exit_velocity", 0)
-                + sc.get("hard_hit_rate", 0) * 100
-                + sc.get("swing_contact_rate", 0) * 100
+            # 修复审计项：旧公式各组件绝对值累加（xwOBA*300 一项就 60-135，
+            # 加上 EV/桶率/接触率后 250-380）→ min(100) 恒饱和，所有打者
+            # statcast_score 都是 100，25% 权重完全失效。
+            # 改为对联盟典型值的相对分：50 为基准，组件偏离线性加减，clip 0-100。
+            score = 50.0 + (
+                (sc.get("xwOBA", 0) - 0.310) * 400
+                + (sc.get("barrel_rate", 0) - 0.060) * 300
+                + (sc.get("exit_velocity", 0) - 88.0) * 3
+                + (sc.get("hard_hit_rate", 0) - 0.380) * 100
+                + (sc.get("swing_contact_rate", 0) - 0.800) * 50
             )
         elif pos in PITCHER_POSITIONS:
             # 修复 H9：statcast.py 存的键是小写 "xera"，此处原来读 "xERA"（大写）
             # 恒取默认值 5，导致所有投手被无差别扣 (3-5)*20 = -40 分。
             # 兼容两种大小写，避免其他数据源用大写。
-            xera = sc.get("xera", sc.get("xERA", 5))
-            score = (
-                (3 - xera) * 20
-                + sc.get("whiff_rate", 0) * 100
-                + sc.get("spin_rate", 0) * 0.1
-                + sc.get("velocity", 0) * 2
-                + (1 - sc.get("hard_hit_allowed_rate", 1)) * 100
+            # 同样改为相对分：50 为基准（投手旧公式同样恒饱和 100）。
+            xera = sc.get("xera", sc.get("xERA", 4.50))
+            score = 50.0 + (
+                (3.80 - xera) * 25
+                + (sc.get("whiff_rate", 0) - 0.240) * 150
+                + (sc.get("velocity", 0) - 93.0) * 2
+                + (sc.get("spin_rate", 0) - 2300.0) * 0.004
+                + (0.360 - sc.get("hard_hit_allowed_rate", 0.360)) * 100
             )
         else:
             score = 0.0
@@ -243,9 +256,12 @@ class FAAnalyzer:
         value = self.calculate_fa_value(player_id)
 
         def _do(conn):
+            # 与 _adjust_for_injury 同口径：只取未康复的最新伤病（按发生日期）。
+            # 修复审计项：旧查询不滤 status 且按 created_at（插入时间）排序，
+            # 已康复球员的最新一条恰好是复出记录，仍按其历史严重度被扣分。
             row = conn.execute(
-                "SELECT * FROM injury_reports WHERE player_id=? "
-                "ORDER BY created_at DESC LIMIT 1",
+                "SELECT * FROM injury_reports WHERE player_id=? AND status != 'recovered' "
+                "ORDER BY start_date DESC LIMIT 1",
                 (player_id,),
             ).fetchone()
             return dict(row) if row else None

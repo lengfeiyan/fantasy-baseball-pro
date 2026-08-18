@@ -17,6 +17,19 @@ from .analyzer import FAAnalyzer
 
 logger = get_logger("fa.recommendation")
 
+# 池/阵容的原始 pos → 槽位键（与 analyzer 的位置归一化同口径；
+# P 为泛投手，按 SP 计缺口）
+_SLOT_NORMALIZE = {
+    "LF": "OF", "CF": "OF", "RF": "OF", "DH": "UTIL", "P": "SP",
+}
+
+
+def _normalize_slot(pos) -> str:
+    """把 FA 池/阵容的原始位置归一化到 roster_slots 键。"""
+    if not pos:
+        return ""
+    return _SLOT_NORMALIZE.get(str(pos), str(pos))
+
 
 class RecommendationSystem:
     """FA 推荐系统。"""
@@ -26,17 +39,23 @@ class RecommendationSystem:
         self.fa_analyzer = fa_analyzer or FAAnalyzer(conn=conn)
         cfg = get_config()
         self.roster_slots = cfg["league"]["roster_slots"]
-        self.risk_preferences = {"conservative": 0.8, "balanced": 1.0, "aggressive": 1.2}
+        # 修复审计项：偏好作为全局乘数不改变排序（保守=激进同序）。
+        # 改为伤病惩罚的放大/衰减系数：conservative 放大惩罚、aggressive 衰减。
+        self.risk_preferences = {"conservative": 1.5, "balanced": 1.0, "aggressive": 0.5}
 
     # -------------------------------------------------------------- 阵容需求
     def analyze_roster_needs(self, user_roster: Optional[List[Dict]] = None) -> Dict[str, float]:
-        """分析阵容各位置需求强度（0-1）。"""
+        """分析阵容各位置需求强度（0-1）。
+
+        修复审计项：roster 里的原始 pos（CF/LF/RF/DH/P 等）先归一化到
+        槽位键（OF/UTIL/SP…），否则这些球员不被计数、缺口被高估。
+        """
         if not user_roster:
             user_roster = self._load_user_roster()
 
         counts = {pos: 0 for pos in self.roster_slots}
         for p in user_roster:
-            pos = p.get("pos")
+            pos = _normalize_slot(p.get("pos"))
             if pos in counts:
                 counts[pos] += 1
 
@@ -114,7 +133,9 @@ class RecommendationSystem:
 
         value = self.fa_analyzer.calculate_fa_value(int(pid))
         pos = player.get("pos")
-        need_factor = needs.get(pos, 0.5)
+        # 修复审计项：池内 pos（CF/LF/RF/DH/P 等）归一化后再查需求表，
+        # 否则一律落到默认 0.5，真实缺口位置拿不到加成
+        need_factor = needs.get(_normalize_slot(pos), 0.5)
         risk_adj = self._calculate_risk_adjustment(int(pid), risk_preference)
         final_score = value["overall_value"] * (1 + need_factor * 0.5) * risk_adj
         return {
@@ -126,10 +147,17 @@ class RecommendationSystem:
             "need_factor": need_factor,
             "risk_adjustment": risk_adj,
             "final_score": final_score,
+            "is_mock": bool(value.get("is_mock", False)),
         }
 
     def _calculate_risk_adjustment(self, player_id: int, risk_preference: str) -> float:
-        """风险调整因子（含伤病与偏好）。"""
+        """风险调整因子（含伤病与偏好）。
+
+        修复审计项：偏好作为全局乘数不改变排序（保守=激进同序）。
+        改为幂缩放：conservative（指数 1.5）放大伤病惩罚、aggressive
+        （指数 0.5）衰减，balanced 即原始因子。幂缩放天然落在 (0, 1]，
+        不会被上限抵消（线性放大 (1-因子)×1.5 会被 min(1.0) 截断成无惩罚）。
+        """
         risk_factor = 1.0
         try:
             details = self.fa_analyzer.get_player_details(player_id)
@@ -137,11 +165,12 @@ class RecommendationSystem:
             if injury:
                 severity = injury.get("severity", "mild")
                 factors = {"mild": 0.95, "moderate": 0.8, "severe": 0.6, "long_term": 0.3}
-                risk_factor *= factors.get(severity, 0.95)
+                injury_factor = factors.get(severity, 0.95)
+                pref_exp = self.risk_preferences.get(risk_preference, 1.0)
+                risk_factor = injury_factor ** pref_exp
         except Exception as e:
             logger.warning("获取球员 %d 详情失败: %s", player_id, e)
-        pref = self.risk_preferences.get(risk_preference, 1.0)
-        return risk_factor * pref
+        return min(risk_factor, 1.0)
 
     # -------------------------------------------------------------- 导出
     def export_recommendations(

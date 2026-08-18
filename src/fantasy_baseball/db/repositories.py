@@ -26,29 +26,40 @@ class _BaseRepository:
         placeholders = ",".join("?" * len(cols))
         return f'INSERT INTO {table} ({quoted}) VALUES ({placeholders})'
 
+    def _insert_rows(self, table: str, rows: Sequence[Dict[str, Any]]) -> int:
+        """按全部行列集的并集批量插入，缺失的键填 NULL。
+
+        修复审计发现的问题：按第一行列集建 INSERT 时，后续行多出的列
+        触发 KeyError、少掉的列导致该列整批丢失。
+        """
+        if not rows:
+            return 0
+        cols: List[str] = []
+        for r in rows:
+            for k in r.keys():
+                if k not in cols:
+                    cols.append(k)
+        sql = self._build_insert_sql(table, cols)
+        self.conn.executemany(sql, [tuple(r.get(c) for c in cols) for r in rows])
+        return len(rows)
+
 
 class PlayerRepository(_BaseRepository):
     """打者 / 投手 / 位置 / 融合数据的访问。"""
 
     # 打者原始数据
     def replace_hitters(self, hitters: Sequence[Dict[str, Any]]) -> int:
-        """批量写入打者原始数据（先清空再插入，用于多源场景）。"""
+        """批量写入打者原始数据（先清空再插入，用于多源场景）。
+
+        行与行列集不一致时按并集对齐、缺的填 NULL（修复审计发现的
+        「按第一行列集建 INSERT → KeyError/整列静默丢弃」问题）。
+        """
         self.conn.execute("DELETE FROM hitters")
-        if not hitters:
-            return 0
-        cols = list(hitters[0].keys())
-        sql = self._build_insert_sql("hitters", cols)
-        self.conn.executemany(sql, [tuple(h[c] for c in cols) for h in hitters])
-        return len(hitters)
+        return self._insert_rows("hitters", hitters)
 
     def replace_pitchers(self, pitchers: Sequence[Dict[str, Any]]) -> int:
         self.conn.execute("DELETE FROM pitchers")
-        if not pitchers:
-            return 0
-        cols = list(pitchers[0].keys())
-        sql = self._build_insert_sql("pitchers", cols)
-        self.conn.executemany(sql, [tuple(p[c] for c in cols) for p in pitchers])
-        return len(pitchers)
+        return self._insert_rows("pitchers", pitchers)
 
     def replace_positions(self, positions: Sequence[Dict[str, Any]]) -> int:
         self.conn.execute("DELETE FROM player_positions")
@@ -63,20 +74,11 @@ class PlayerRepository(_BaseRepository):
     # 融合数据
     def replace_merged_hitters(self, rows: Sequence[Dict[str, Any]]) -> int:
         self.conn.execute("DELETE FROM hitters_merged")
-        if not rows:
-            return 0
-        cols = list(rows[0].keys())
-        sql = self._build_insert_sql("hitters_merged", cols)
-        self.conn.executemany(sql, [tuple(r[c] for c in cols) for r in rows])
-        return len(rows)
+        return self._insert_rows("hitters_merged", rows)
 
     def replace_merged_pitchers(self, rows: Sequence[Dict[str, Any]]) -> int:
         self.conn.execute("DELETE FROM pitchers_merged")
-        if not rows:
-            return 0
-        cols = list(rows[0].keys())
-        sql = self._build_insert_sql("pitchers_merged", cols)
-        self.conn.executemany(sql, [tuple(r[c] for c in cols) for r in rows])
+        return self._insert_rows("pitchers_merged", rows)
         return len(rows)
 
     # 读取（返回 DataFrame，供评分模块使用）

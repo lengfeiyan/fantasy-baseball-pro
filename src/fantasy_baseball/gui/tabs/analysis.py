@@ -52,8 +52,10 @@ def create_tab(parent: tk.Widget, app) -> None:
         )
 
     def step_rank():
+        # UI 线程先取值（Tk 变量不支持跨线程访问）
+        method = method_var.get()
+
         def _work():
-            method = method_var.get()
             app.post(f"[2/3] 计算 {method.upper()} 排名...")
             if method == "sgp":
                 from ...core.sgp import SGPModel
@@ -69,8 +71,11 @@ def create_tab(parent: tk.Widget, app) -> None:
     def step_adp():
         def _work():
             app.post("【3/3】准备 ADP 数据…")
-            df = ADPCache().fetch_adp(force=True)
-            return resolve_path(ADPCache().adp_file)
+            cache = ADPCache()
+            cache.fetch_adp(force=True)
+            # adp_file 本身就是绝对路径（core/adp.py 内部已做 resolve_path）。
+            # 修复：此前此处误调 resolve_path，而该名未导入 → 每次点击必弹 NameError。
+            return cache.adp_file
 
         app.run_async(
             _work,
@@ -79,11 +84,13 @@ def create_tab(parent: tk.Widget, app) -> None:
         )
 
     def run_full():
+        # UI 线程先取值（Tk 变量不支持跨线程访问）
+        method = method_var.get()
+
         def _work():
             app.post("[1/3] 导入数据...")
             DataIngestor().ingest_all()
             app.post("[2/3] 计算排名...")
-            method = method_var.get()
             if method == "sgp":
                 from ...core.sgp import SGPModel
                 rank_path = SGPModel().generate_rankings()

@@ -36,16 +36,23 @@ def create_tab(parent: tk.Widget, app) -> None:
     _, output = text_display(parent, height=16)
 
     def do_find():
+        # UI 线程先取值（Tk 变量不支持跨线程访问）；int 转换留在工作线程，
+        # 失败仍走 run_async 的中文错误弹窗
+        position = pos_var.get()
+        min_adp_s, max_adp_s, min_bias_s, top_s = (
+            min_adp_var.get(), max_adp_var.get(), min_bias_var.get(), top_var.get()
+        )
+        use_sc = bool(use_statcast.get())
+
         def _work():
             app.post("挖掘 Sleeper 中...")
-            position = pos_var.get()
             df = find_sleepers(
-                min_adp=int(min_adp_var.get()),
-                max_adp=int(max_adp_var.get()),
-                min_bias=int(min_bias_var.get()),
-                top=int(top_var.get()),
+                min_adp=int(min_adp_s),
+                max_adp=int(max_adp_s),
+                min_bias=int(min_bias_s),
+                top=int(top_s),
                 position=None if position == "All" else position,
-                use_statcast=use_statcast.get(),
+                use_statcast=use_sc,
             )
             if df.empty:
                 return "未找到符合条件的 Sleeper 球员。"

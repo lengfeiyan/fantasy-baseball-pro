@@ -36,9 +36,12 @@ def create_tab(parent: tk.Widget, app) -> None:
     _, output = text_display(parent, height=16)
 
     def do_query():
+        # UI 线程先取值（Tk 变量不支持跨线程访问）
+        name = name_var.get().strip()
+        season_s = season_var.get()
+
         def _work():
-            name = name_var.get().strip()
-            season = int(season_var.get())
+            season = int(season_s)
             app.post(f"查询 {name} ({season})...")
 
             client = MLBStatsClient()

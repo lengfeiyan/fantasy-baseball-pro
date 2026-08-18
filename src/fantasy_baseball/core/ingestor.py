@@ -88,7 +88,9 @@ class DataIngestor:
         pitchers_df = fetch_projections("pitchers", season)
 
         # 准备入库数据（保留 VORP + SGP 所需列），按 name 去重避免 UNIQUE 冲突
-        hitter_cols = [c for c in ["name", "team", "pos", "R", "HR", "RBI", "SB",
+        # eligible_pos：FantasyPros 抓取时计算的多位置资格，scoring 的
+        # 多位置 VORP 依赖它（修复审计项：此前被丢弃，逻辑成死代码）
+        hitter_cols = [c for c in ["name", "team", "pos", "eligible_pos", "R", "HR", "RBI", "SB",
                                    "AVG", "OBP", "SLG", "OPS", "PA",
                                    "AB", "H", "2B", "3B", "BB", "SO"]
                        if c in hitters_df.columns]
@@ -229,7 +231,9 @@ class DataIngestor:
     @staticmethod
     def _df_to_rows(df: pd.DataFrame, stats_cols: List[str]) -> List[Dict]:
         """DataFrame 转为 dict 列表，只保留 name/team/pos/source + 统计列。"""
-        keep = ["name", "team", "pos", "source"] + [c for c in stats_cols if c in df.columns]
+        keep = ["name", "team", "pos", "eligible_pos", "source"] + [
+            c for c in stats_cols if c in df.columns
+        ]
         sub = df[[c for c in keep if c in df.columns]].copy()
         # 统计列转数值
         for c in stats_cols:
@@ -263,7 +267,10 @@ class DataIngestor:
                     continue
                 vals = pd.to_numeric(df[col], errors="coerce")
                 wsum = (vals * df["_weight"]).groupby(df["name"]).sum(min_count=1)
-                wtot = df["_weight"].groupby(df["name"]).sum()
+                # 只用有值的源归一化：某源该列缺失时其权重不计入分母。
+                # 修复审计项：此前 NaN 行权重照计，融合值按缺失比例向 0 缩水
+                # （如 STEAMER w=0.7 有值 + ZIPS w=0.3 缺失 → 结果 0.7×值）。
+                wtot = df["_weight"].where(vals.notna()).groupby(df["name"]).sum()
                 merged[col] = wsum / wtot.replace(0, pd.NA)
 
             merged = merged.reset_index()
@@ -290,6 +297,8 @@ class DataIngestor:
             if df.empty:
                 return 0
             keep = ["name", "team", "pos"] + [c for c in stats_cols if c in df.columns]
+            if player_type == "hitters" and "eligible_pos" in df.columns:
+                keep.append("eligible_pos")
             rows = df[keep].to_dict("records")
             repo = PlayerRepository(conn)
             if player_type == "hitters":

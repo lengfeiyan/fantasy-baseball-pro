@@ -25,7 +25,7 @@ from ._widgets import (
 
 def create_tab(parent: tk.Widget, app) -> None:
     # ===== 阵容验证区（原有功能）=====
-    file_frame = section_frame(parent, "阵容验证（选秀日志 CSV）")
+    file_frame = section_frame(parent, "阵容验证（选秀日志 CSV，全联盟日志自动按 is_user_pick 提取你的球队）")
     _, log_var = labeled_input(file_frame, "日志文件", "draft_log_pick5_balanced.csv", width=40)
 
     def browse():
@@ -41,11 +41,14 @@ def create_tab(parent: tk.Widget, app) -> None:
     _, output = text_display(parent, height=14)
 
     def do_validate():
+        # UI 线程先取值（Tk 变量不支持跨线程访问）
+        log_path = log_var.get().strip()
+
         def _work():
             app.post("验证阵容中...")
             v = RosterValidator()
-            result = v.validate_roster(log_var.get())
-            strength = v.analyze_roster_strength(log_var.get())
+            result = v.validate_roster(log_path)
+            strength = v.analyze_roster_strength(log_path)
 
             lines = ["阵容合规性检查\n", "-" * 50 + "\n"]
             for pos, required in result.slot_requirements.items():
@@ -97,6 +100,8 @@ def create_tab(parent: tk.Widget, app) -> None:
         if not log_path:
             messagebox.showwarning("提示", "请先填写选秀日志文件路径")
             return
+        # UI 线程先取值（Tk 变量不支持跨线程访问）
+        pick_s = pick_var.get()
 
         def _work():
             app.post("从选秀日志导入阵容...")
@@ -110,7 +115,7 @@ def create_tab(parent: tk.Widget, app) -> None:
             df = pd.read_csv(path)
 
             # 尝试提取用户阵容（draft log 有 is_user_pick 列时优先用之；否则按顺位）
-            user_pick = int(pick_var.get())
+            user_pick = int(pick_s)
             if "team" in df.columns and "is_user_pick" in df.columns:
                 user_df = df[df["is_user_pick"] == True]
             elif "team" in df.columns:

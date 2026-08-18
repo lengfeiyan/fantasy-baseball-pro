@@ -113,8 +113,16 @@ def create_tab(parent: tk.Widget, app) -> None:
             for stat, var in sgp_pitcher_vars.items():
                 updates[f"sgp.denominators.pitchers.{stat}"] = float(var.get())
 
-            save_config_values(updates)
-            messagebox.showinfo("成功", "配置已保存（注释已保留）")
+            missing = save_config_values(updates)
+            if missing:
+                messagebox.showwarning(
+                    "部分保存",
+                    "以下配置项在 config.yaml 中未找到，未保存：\n"
+                    + "\n".join(missing)
+                    + "\n其余配置已保存（注释已保留）。",
+                )
+            else:
+                messagebox.showinfo("成功", "配置已保存（注释已保留）")
             app.set_status("配置已保存")
         except Exception as e:
             messagebox.showerror("错误", friendly_error(e))

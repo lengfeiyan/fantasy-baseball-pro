@@ -45,7 +45,9 @@ class PluginManager:
                 if not spec or not spec.loader:
                     continue
                 module = importlib.util.module_from_spec(spec)
-                sys.modules[item] = module
+                # 注册名加前缀：插件目录名与标准库/三方包同名时（如 json），
+                # 直接用裸名注册会进程级劫持后续所有同名 import
+                sys.modules[f"_fb_plugin_{item}"] = module
                 spec.loader.exec_module(module)
 
                 for attr_name in dir(module):

@@ -106,3 +106,43 @@ def test_ingestor_multi_source_merge(fresh_conn, tmpdir, monkeypatch):
     assert len(df) == 1
     # HR 应为 (20+30)/2 = 25
     assert df.iloc[0]["HR"] == pytest.approx(25.0)
+
+
+def test_ingestor_multi_source_nan_weight_normalized(fresh_conn, tmpdir, monkeypatch):
+    """回归（审计项）：某源缺列时，融合按可用源的权重归一化。
+
+    旧实现把 NaN 行的权重计入分母 → STEAMER(w=0.7, HR=30) + ZIPS(w=0.3, HR 缺失)
+    融合出 21.0 而非 30.0（缩水 30%）。
+    """
+    s1 = tmpdir.join("hitters_2026_steamer.csv")
+    s1.write_text(
+        "Name,Team,POS,R,HR,RBI,SB,AVG\nPlayer,TM,OF,100,30,80,10,0.280\n",
+        encoding="utf-8",
+    )
+    s2 = tmpdir.join("hitters_2026_zips.csv")
+    # ZIPS 源缺失 HR 列
+    s2.write_text(
+        "Name,Team,POS,R,RBI,SB,AVG\nPlayer,TM,OF,120,90,15,0.300\n",
+        encoding="utf-8",
+    )
+
+    ing = DataIngestor(conn=fresh_conn)
+    monkeypatch.setattr(ing, "config", {
+        "data": {"use_multi_source": True,
+                 "file_patterns": {"hitters": "hitters_2026_{source}.csv", "pitchers": "p.csv"},
+                 "positions_file": "none.csv"},
+        "projections": {"sources": ["STEAMER", "ZIPS"], "weights": {"STEAMER": 0.7, "ZIPS": 0.3}},
+    })
+    monkeypatch.setattr(
+        "fantasy_baseball.core.ingestor.resolve_path",
+        lambda p: str(tmpdir / os.path.basename(p)),
+    )
+
+    ing.ingest_hitters()
+    ing.merge_data()
+    df = PlayerRepository(fresh_conn).get_merged_hitters()
+    assert len(df) == 1
+    # 只有 STEAMER 有 HR：融合值应 = 30（而非 0.7×30=21）
+    assert df.iloc[0]["HR"] == pytest.approx(30.0, abs=0.001)
+    # 两源都有的 R：0.7×100 + 0.3×120 = 106
+    assert df.iloc[0]["R"] == pytest.approx(0.7 * 100 + 0.3 * 120, abs=0.01)

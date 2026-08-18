@@ -60,8 +60,11 @@ class FantasyBaseballGUI:
         self.root.title("Fantasy Baseball Pro")
         self.root.geometry("900x650")
         self.root.resizable(True, True)
-        # 启动时最大化窗口
-        self.root.state("zoomed")
+        # 启动时最大化窗口（Linux X11 无 zoomed 参数，忽略即可）
+        try:
+            self.root.state("zoomed")
+        except tk.TclError:
+            pass
 
         # 异步任务消息队列（工作线程 → 主线程）
         self._msg_queue: queue.Queue = queue.Queue()
@@ -96,8 +99,13 @@ class FantasyBaseballGUI:
         # 进度对话框（懒创建）
         self._progress: Optional[ttk.Progressbar] = None
         self._cancel_btn: Optional[ttk.Button] = None
-        # 当前任务的取消信号
+        # 取消按钮作用于最近启动的可取消任务
         self._cancel_event: Optional[threading.Event] = None
+        # 每个任务自己的取消信号（按工作线程 ident 映射）。
+        # 修复审计项：单一共享 event 时，并发任务的完成判定/取消会互相干扰。
+        self._task_events: dict = {}
+        # 进行中的任务数（UI 线程维护），用于并发任务下正确隐藏进度条
+        self._active_tasks = 0
 
         # 启动队列轮询
         self.root.after(100, self._poll_queue)
@@ -121,14 +129,21 @@ class FantasyBaseballGUI:
             cancellable: 是否显示取消按钮。短任务可设 False。
         """
         self.set_status(status)
+        self._active_tasks += 1
         self._enable_progress(True, cancellable=cancellable)
-        self._cancel_event = threading.Event() if cancellable else None
+        # 每个任务独立的取消信号；取消按钮作用于最近启动的可取消任务
+        event = threading.Event() if cancellable else None
+        self._cancel_event = event
 
         def worker():
+            ident = threading.get_ident()
+            if event is not None:
+                self._task_events[ident] = event
             try:
                 result = func()
-                # 修复 M4：任务完成时若已被取消，丢弃结果（不执行 on_done）
-                if self._cancel_event is not None and self._cancel_event.is_set():
+                # 完成时只检查本任务自己的取消信号（共享 event 会被并发
+                # 新任务的取消误伤，导致 A 的结果被 B 的取消丢弃）
+                if event is not None and event.is_set():
                     self._msg_queue.put(("cancelled", None, None))
                 else:
                     self._msg_queue.put(("done", result, on_done))
@@ -137,6 +152,8 @@ class FantasyBaseballGUI:
             except BaseException as e:  # noqa: BLE001
                 logger.exception("后台任务失败")
                 self._msg_queue.put(("error", e, on_error))
+            finally:
+                self._task_events.pop(ident, None)
 
         t = threading.Thread(target=worker, daemon=True)
         self._workers.append(t)
@@ -144,8 +161,11 @@ class FantasyBaseballGUI:
         return t
 
     def is_cancelled(self) -> bool:
-        """工作线程内检查当前任务是否被取消。"""
-        return self._cancel_event is not None and self._cancel_event.is_set()
+        """工作线程内检查当前任务是否被取消（按线程取各自的信号）。"""
+        ev = self._task_events.get(threading.get_ident())
+        if ev is None:
+            ev = self._cancel_event
+        return ev is not None and ev.is_set()
 
     def post(self, msg: str) -> None:
         """工作线程内推送进度文本（线程安全）。"""
@@ -158,14 +178,22 @@ class FantasyBaseballGUI:
             self.set_status("正在取消...")
 
     def _poll_queue(self) -> None:
-        """主线程轮询消息队列，分发回调。"""
+        """主线程轮询消息队列，分发回调。
+
+        修复审计项：① after 重排移入 finally——此前任何未捕获异常会让
+        轮询链永久死亡（之后所有任务的状态/结果永不到达，进度条卡死）；
+        ② error 分支回调未包裹——on_error 自身抛错同样杀死轮询链。
+        """
         try:
             while True:
                 kind, payload, cb = self._msg_queue.get_nowait()
                 if kind == "status":
                     self.set_status(str(payload))
-                elif kind == "done":
-                    self._enable_progress(False)
+                    continue
+                # done/cancelled/error 都意味着一个任务结束
+                self._active_tasks = max(0, self._active_tasks - 1)
+                if kind == "done":
+                    self._settle_progress()
                     self.set_status("完成")
                     if cb:
                         try:
@@ -174,18 +202,30 @@ class FantasyBaseballGUI:
                             logger.error("on_done 回调失败: %s", e)
                             messagebox.showerror("错误", friendly_error(e))
                 elif kind == "cancelled":
-                    self._enable_progress(False)
+                    self._settle_progress()
                     self.set_status("已取消")
                 elif kind == "error":
-                    self._enable_progress(False)
+                    self._settle_progress()
                     self.set_status("出错")
                     if cb:
-                        cb(payload)
+                        try:
+                            cb(payload)
+                        except Exception as e:
+                            logger.error("on_error 回调失败: %s", e)
+                            messagebox.showerror("错误", friendly_error(e))
                     else:
                         messagebox.showerror("错误", friendly_error(payload))
         except queue.Empty:
             pass
-        self.root.after(100, self._poll_queue)
+        except Exception as e:  # 单条消息处理异常不应杀死轮询链
+            logger.error("消息队列处理异常: %s", e)
+        finally:
+            self.root.after(100, self._poll_queue)
+
+    def _settle_progress(self) -> None:
+        """任务结束时收敛进度条：仍有并发任务在跑则保持显示。"""
+        if self._active_tasks <= 0:
+            self._enable_progress(False)
 
     # --------------------------------------------------------- UI helpers
     def set_status(self, text: str) -> None:

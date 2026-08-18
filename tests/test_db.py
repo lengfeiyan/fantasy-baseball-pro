@@ -104,3 +104,73 @@ def test_fa_pool_no_strict_fk(fresh_conn):
     pid = repo.add_to_pool({"player_id": 99999, "name": "Ghost", "team": "T",
                             "pos": "OF", "status": "available"})
     assert pid > 0
+
+
+# ============================================================
+# user_roster 外键迁移（审计高危项回归：旧 schema 每次连接都重建表）
+# ============================================================
+def test_user_roster_fk_migration(tmpdir):
+    """带 FK 的旧表 → 打开连接一次性迁移 → 数据保留、新表无 FK、不再重复迁移。"""
+    from fantasy_baseball.db.connection import get_connection
+
+    db = str(tmpdir.join("test.db"))
+    # 手工构造旧版 schema：user_roster 带 FOREIGN KEY
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE hitters (id INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("INSERT INTO hitters VALUES (1, 'RealPlayer')")
+    conn.execute("""
+        CREATE TABLE user_roster (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, player_id INTEGER, name TEXT,
+            team TEXT, pos TEXT, status TEXT,
+            acquisition_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (player_id) REFERENCES hitters(id) ON DELETE SET NULL
+        )""")
+    conn.execute("INSERT INTO user_roster(player_id, name, pos) VALUES (1, 'RealPlayer', 'OF')")
+    # player_id 不在 hitters 中的行（FA 捡的球员）——旧恢复路径会静默丢这行
+    conn.execute("INSERT INTO user_roster(player_id, name, pos) VALUES (999, 'GhostPlayer', 'SP')")
+    conn.commit()
+    conn.close()
+
+    # 第一次打开：触发迁移
+    c1 = get_connection(db)
+    create_sql = c1.execute(
+        "SELECT sql FROM sqlite_master WHERE name='user_roster'"
+    ).fetchone()[0]
+    assert "FOREIGN KEY" not in create_sql.upper()
+    names = {r["name"] for r in c1.execute("SELECT name FROM user_roster")}
+    assert names == {"RealPlayer", "GhostPlayer"}  # 数据全部保留
+    c1.close()
+
+    # 第二次打开：不再触发迁移（无备份表残留、数据不重复）
+    c2 = get_connection(db)
+    assert c2.execute("SELECT COUNT(*) FROM user_roster").fetchone()[0] == 2
+    assert c2.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name='_migration_backup'"
+    ).fetchone()[0] == 0
+    c2.close()
+
+
+def test_user_roster_survives_hitters_replace(tmpdir):
+    """去 FK 后：重导入预测数据（DELETE hitters）不再清空 user_roster.player_id。"""
+    from fantasy_baseball.db.connection import get_connection
+    from fantasy_baseball.db.repositories import PlayerRepository, RosterRepository
+
+    db = str(tmpdir.join("test.db"))
+    conn = get_connection(db)
+    PlayerRepository(conn).replace_hitters([
+        {"name": "H1", "team": "TM", "pos": "OF", "R": 90, "HR": 25},
+    ])
+    conn.commit()
+    roster = RosterRepository(conn)
+    roster.add_player({"player_id": 1, "name": "H1", "pos": "OF"})
+    conn.commit()
+
+    # 重新导入预测（清空 hitters）→ roster 行应原样保留
+    PlayerRepository(conn).replace_hitters([
+        {"name": "NewH", "team": "TM", "pos": "SS", "R": 80, "HR": 20},
+    ])
+    conn.commit()
+    rows = conn.execute("SELECT player_id, name FROM user_roster").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["player_id"] == 1
+    conn.close()

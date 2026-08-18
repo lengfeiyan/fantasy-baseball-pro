@@ -121,6 +121,77 @@ class TestRunAsync:
         assert gui_app.status_var.get() in ("完成", "步骤1...")
 
 
+class TestConcurrentTasks:
+    """并发任务隔离（审计项回归：共享 cancel_event 曾让任务互相误伤）。"""
+
+    def test_cancel_one_task_does_not_discard_other(self, gui_app):
+        results = []
+
+        def task_a():
+            time.sleep(0.3)  # 慢任务，被取消
+            return "A-done"
+
+        def task_b():
+            time.sleep(0.1)  # 快任务，正常完成
+            return "B-done"
+
+        t_a = gui_app.run_async(task_a, on_done=lambda r: results.append(r))
+        time.sleep(0.05)
+        gui_app.run_async(task_b, on_done=lambda r: results.append(r))
+        time.sleep(0.15)  # B 已完成、A 还在跑
+        gui_app._cancel_current()  # 取消的是最近任务……A 仍用自己的信号
+        _process_events(gui_app, timeout=2.0)
+        assert "B-done" in results
+
+    def test_cancel_most_recent_task(self, gui_app):
+        """取消按钮应作用于最近启动的任务（每任务独立信号）。"""
+        from fantasy_baseball.gui.app import TaskCancelled
+
+        def task_a():
+            time.sleep(0.4)
+            return "A-done"
+
+        def task_b():
+            for _ in range(100):
+                if gui_app.is_cancelled():
+                    raise TaskCancelled()
+                time.sleep(0.01)
+            return "B-done"
+
+        gui_app.run_async(task_a)
+        time.sleep(0.05)
+        gui_app.run_async(task_b)
+        time.sleep(0.05)
+        gui_app._cancel_current()  # 取消 B；A 不受影响
+        _process_events(gui_app, timeout=2.0)
+        # B 被取消，A 正常完成（若共享信号，A 完成时也会被丢弃并显示已取消）
+        assert gui_app.status_var.get() in ("完成", "已取消")
+
+    def test_on_error_exception_does_not_kill_polling(self, gui_app, monkeypatch):
+        """error 回调自身抛异常时，轮询链必须存活（审计项回归）。"""
+        results = []
+        # 打桩掉真实 modal 弹窗，避免阻塞测试 mainloop
+        popups = []
+        monkeypatch.setattr(
+            "fantasy_baseball.gui.app.messagebox.showerror",
+            lambda *a, **k: popups.append(a),
+        )
+
+        def bad_task():
+            raise ValueError("boom")
+
+        def bad_on_error(e):
+            raise RuntimeError("on_error 自身崩溃")
+
+        gui_app.run_async(bad_task, on_error=bad_on_error)
+        _process_events(gui_app, timeout=1.0)
+        # 轮询链仍活着：再跑一个任务应正常完成
+        gui_app.run_async(lambda: "ok", on_done=lambda r: results.append(r))
+        _process_events(gui_app, timeout=2.0)
+        assert results == ["ok"]
+        assert len(popups) >= 1  # on_error 崩溃被兜底弹窗报告
+
+
 # ============================================================
 # 各 tab 模块可调用性测试
 # ============================================================

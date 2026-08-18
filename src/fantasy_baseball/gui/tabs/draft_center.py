@@ -51,20 +51,24 @@ def create_tab(parent: tk.Widget, app) -> None:
     _, output = text_display(parent, height=16)
 
     def do_snake_draft():
+        # UI 线程先取值（Tk 变量不支持跨线程访问）
+        method = method_var.get()
+        pick_s = pick_var.get()
+        strategy = strategy_var.get()
+
         def _work():
-            method = method_var.get()
             app.post(f"模拟蛇形选秀中（{method.upper()}）...")
-            pick = int(pick_var.get())
+            pick = int(pick_s)
             sim = SnakeDraftSimulator(method=method)
-            log = sim.simulate_draft(user_pick=pick, strategy=strategy_var.get())
+            log = sim.simulate_draft(user_pick=pick, strategy=strategy)
             # 传入已算好的 log，避免 simulate_and_save 内部再模拟一遍（修复 L1）
             log_path = sim.simulate_and_save(
-                user_pick=pick, strategy=strategy_var.get(), log_df=log
+                user_pick=pick, strategy=strategy, log_df=log
             )
             user_picks = log[log["team"] == pick]
             value_label = "SGP" if method == "sgp" else "VORP"
             value_key = "sgp_total" if method == "sgp" else "vorp"
-            lines = [f"你的阵容（第{pick}顺位，{strategy_var.get()}策略，{value_label}）：\n"]
+            lines = [f"你的阵容（第{pick}顺位，{strategy}策略，{value_label}）：\n"]
             for _, r in user_picks.iterrows():
                 mark = " [价值股]" if r.get("is_value_pick") else ""
                 lines.append(
@@ -77,13 +81,17 @@ def create_tab(parent: tk.Widget, app) -> None:
         app.run_async(_work, on_done=lambda r: set_text(output, r), status="模拟选秀...")
 
     def do_monte_carlo():
+        # UI 线程先取值（Tk 变量不支持跨线程访问）
+        method = method_var.get()
+        target_s = mc_pick_var.get()
+        min_avail_s = min_avail_var.get()
+
         def _work():
-            method = method_var.get()
             app.post(f"运行蒙特卡洛模拟（{method.upper()}，可能需数秒）...")
-            target = int(mc_pick_var.get())
+            target = int(target_s)
             engine = DraftEngine(method=method)
             avail = engine.analyze_availability(target_pick=target)
-            threshold = float(min_avail_var.get())
+            threshold = float(min_avail_s)
             top = avail[avail["availability_prob"] >= threshold].head(15)
             if top.empty:
                 return f"在可用率 >= {threshold} 时无目标球员，尝试降低阈值。"

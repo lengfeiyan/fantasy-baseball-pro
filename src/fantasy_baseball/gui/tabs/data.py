@@ -48,8 +48,11 @@ def create_tab(parent: tk.Widget, app) -> None:
     _, output = text_display(parent, height=10)
 
     def do_fetch_web():
+        # UI 线程先取值（Tk 变量不支持跨线程访问）
+        season_s = season_var.get()
+
         def _work():
-            season = int(season_var.get())
+            season = int(season_s)
             app.post(f"从 FantasyPros 抓取 {season} 赛季预测数据...")
             counts = DataIngestor().ingest_from_web(season=season)
             return counts

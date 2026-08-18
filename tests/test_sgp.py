@@ -138,3 +138,71 @@ class TestSGPvsVORP:
         """SGP 排名应含各类别分项。"""
         for col in ["sgp_R", "sgp_HR", "sgp_RBI", "sgp_SB", "sgp_AVG"]:
             assert col in seeded_sgp.columns
+
+
+# ============================================================
+# 缺列反推与中性处理（审计高危项回归：旧实现 fillna(0) 当真实零产量）
+# ============================================================
+class TestMissingStatBackDerivation:
+    def test_pitcher_back_derivation(self, fresh_conn):
+        """CSV 管线缺 K/ER/H_allow/BB_allow → 从 ERA/WHIP/K_per_9/IP 精确反推。
+
+        FullSP 带精确自洽的全列（K=K_per_9×IP/9 等），SparseSP 只有比率列，
+        两者的 sgp_K/sgp_ERA/sgp_WHIP 应一致。
+        """
+        repo = PlayerRepository(fresh_conn)
+        full = {"name": "FullSP", "team": "TM", "pos": "SP", "W": 12, "SV": 0,
+                "ERA": 4.00, "WHIP": 1.25, "K_per_9": 8.5, "IP": 180,
+                "K": 8.5 * 180 / 9, "ER": 4.00 * 180 / 9,
+                "H_allow": 1.25 * 180 - 57, "BB_allow": 57}
+        sparse = {"name": "SparseSP", "team": "TM", "pos": "SP", "W": 12, "SV": 0,
+                  "ERA": 4.00, "WHIP": 1.25, "K_per_9": 8.5, "IP": 180}
+        repo.replace_merged_pitchers([full, sparse])
+
+        df = SGPModel(conn=fresh_conn).calculate_sgp()
+        f = df[df["name"] == "FullSP"].iloc[0]
+        s = df[df["name"] == "SparseSP"].iloc[0]
+        assert s["sgp_K"] == pytest.approx(f["sgp_K"], abs=0.02)
+        assert s["sgp_ERA"] == pytest.approx(f["sgp_ERA"], abs=0.02)
+        assert s["sgp_WHIP"] == pytest.approx(f["sgp_WHIP"], abs=0.02)
+
+    def test_pitcher_missing_ratio_stats_neutral(self, fresh_conn):
+        """ERA/WHIP/ER 全缺 → 该两类记 NaN（中性），不再因 ER=0 反向加分。
+
+        旧实现：ER=0 使 team_ERA 退化为 4275/(IP+1192)，只随 IP 单调上升，
+        局数多的烂投手反而拿高额 ERA 分。
+        """
+        repo = PlayerRepository(fresh_conn)
+        repo.replace_merged_pitchers([
+            {"name": "NoRateSP", "team": "TM", "pos": "SP",
+             "W": 10, "SV": 0, "IP": 180, "K": 150},
+        ])
+        df = SGPModel(conn=fresh_conn).calculate_sgp()
+        row = df.iloc[0]
+        import pandas as pd
+        assert pd.isna(row["sgp_ERA"])
+        assert pd.isna(row["sgp_WHIP"])
+        # total = W/3.03 + K/39.3（单一球员无替代水平扣减：cutoff=0 不触发）
+        assert row["sgp_total"] == pytest.approx(10 / 3.03 + 150 / 39.3, abs=0.01)
+
+    def test_hitter_avg_back_derivation(self, fresh_conn):
+        """AB/H 缺但有 PA/AVG → AB≈0.88×PA 估算、H=AVG×AB 反推，
+        sgp_AVG 与带真实列的近似一致（而不是全员同一个假值）。"""
+        repo = PlayerRepository(fresh_conn)
+        repo.replace_merged_hitters([
+            {"name": "FullH", "team": "TM", "pos": "OF",
+             "R": 80, "HR": 18, "RBI": 70, "SB": 15, "AVG": 0.270, "PA": 600,
+             "AB": 528, "H": 142.6},
+            {"name": "SparseH", "team": "TM", "pos": "OF",
+             "R": 80, "HR": 18, "RBI": 70, "SB": 15, "AVG": 0.270, "PA": 600},
+            {"name": "BareH", "team": "TM", "pos": "OF",
+             "R": 80, "HR": 18, "RBI": 70, "SB": 10},
+        ])
+        df = SGPModel(conn=fresh_conn).calculate_sgp()
+        full = df[df["name"] == "FullH"].iloc[0]
+        sparse = df[df["name"] == "SparseH"].iloc[0]
+        bare = df[df["name"] == "BareH"].iloc[0]
+        import pandas as pd
+        assert sparse["sgp_AVG"] == pytest.approx(full["sgp_AVG"], abs=0.1)
+        # PA/AVG 全缺 → NaN 中性，而不是 0/0 产生的同一个常数
+        assert pd.isna(bare["sgp_AVG"])

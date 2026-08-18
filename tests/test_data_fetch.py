@@ -80,6 +80,50 @@ def test_parse_injury_10_day():
     assert result["team"] == "Texas Rangers"  # team 从描述解析
 
 
+def test_parse_injury_activated_is_recovered():
+    """回归（审计项）：MLB 复出用 "activated ... from the N-day injured list"。
+
+    旧实现只认 reinstated（实测 110 条 IL 记录中出现 0 次），激活记录被
+    当成现行 IL，伤病惩罚永不解除。
+    """
+    t = {
+        "description": "Houston Astros activated RHP Ronel Blanco from the 60-day injured list.",
+        "person": {"id": 671298, "fullName": "Ronel Blanco"},
+        "effectiveDate": "2026-08-01",
+    }
+    result = _parse_injury_transaction(t)
+    assert result["status"] == "recovered"
+    assert result["team"] == "Houston Astros"  # 动词列表补 activated 后可解析
+
+
+def test_parse_injury_transfer_takes_target_days():
+    """回归（审计项）：转会计入目标 IL 天数，而非转出名单。
+
+    "from the 10-day ... to the 60-day injured list" 应判 severe，
+    旧实现取第一个匹配（10 天）错判 mild。
+    """
+    t = {
+        "description": "Los Angeles Dodgers transferred C Will Smith from the 10-day injured list to the 60-day injured list.",
+        "person": {"id": 656987, "fullName": "Will Smith"},
+        "effectiveDate": "2026-08-02",
+    }
+    result = _parse_injury_transaction(t)
+    assert result["severity"] == "severe"
+    assert result["status"] == "IL"
+    assert result["team"] == "Los Angeles Dodgers"
+
+
+def test_parse_injury_reinstated_still_recovered():
+    """reinstated 变体仍识别为复出。"""
+    t = {
+        "description": "Boston Red Sox reinstated 2B Vaughn Grissom from the 15-day injured list.",
+        "person": {"id": 658857, "fullName": "Vaughn Grissom"},
+        "effectiveDate": "2026-08-03",
+    }
+    result = _parse_injury_transaction(t)
+    assert result["status"] == "recovered"
+
+
 def test_parse_injury_60_day():
     """60-day IL → severe。"""
     t = {
@@ -233,3 +277,19 @@ def test_statcast_pitcher_mock_fallback(tmpdir, monkeypatch):
     assert "velocity" in result
     assert "whiff_rate" in result
     assert result["type"] == "pitcher"
+
+
+def test_fetch_injuries_network_failure_raises(tmpdir, monkeypatch):
+    """回归（审计项）：网络失败必须抛异常，不再返回空列表冒充"无伤病"。
+
+    旧实现返回 []，上层 real_time 的 RuntimeError 分支永远不可达，
+    GUI 把断网当成"该时段无伤病动态"。
+    """
+    from fantasy_baseball.data_fetch.mlb_api import MLBStatsClient
+
+    client = MLBStatsClient(cache_dir=str(tmpdir))
+    monkeypatch.setattr(
+        "fantasy_baseball.data_fetch.mlb_api._http_get_json", lambda *a, **k: None
+    )
+    with pytest.raises(RuntimeError, match="无法访问"):
+        client.fetch_injuries("2026-08-01", "2026-08-16")

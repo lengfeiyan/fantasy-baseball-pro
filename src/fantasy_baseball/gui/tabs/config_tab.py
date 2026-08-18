@@ -21,34 +21,63 @@ logger = get_logger("gui.config")
 def create_tab(parent: tk.Widget, app) -> None:
     cfg = get_config()
 
+    # 可滚动容器：配置区块多（7 个区块 30+ 行输入框），单列会超出可视区域
+    canvas = tk.Canvas(parent, highlightthickness=0)
+    vsb = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+    inner = ttk.Frame(canvas, padding="4")
+    inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    win = canvas.create_window((0, 0), window=inner, anchor="nw")
+    # 内容宽度跟随画布（避免窗口拉宽后右侧留白/内容截断）
+    canvas.bind("<Configure>", lambda e: canvas.itemconfigure(win, width=e.width))
+    canvas.configure(yscrollcommand=vsb.set)
+    vsb.pack(side=tk.RIGHT, fill=tk.Y)
+    canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    def _on_wheel(e):
+        # Windows 滚轮：delta ±120
+        canvas.yview_scroll(int(-e.delta / 120), "units")
+        return "break"  # 阻止其他控件（如下拉框）重复响应
+
+    # 鼠标在配置页内才接管滚轮，离开即还回（bind_all 是全局的）
+    canvas.bind("<Enter>", lambda e: parent.bind_all("<MouseWheel>", _on_wheel))
+    canvas.bind("<Leave>", lambda e: parent.unbind_all("<MouseWheel>"))
+
+    # 双列布局，进一步压缩高度
+    left_col = ttk.Frame(inner)
+    left_col.grid(row=0, column=0, sticky="nw", padx=(0, 10))
+    right_col = ttk.Frame(inner)
+    right_col.grid(row=0, column=1, sticky="nw")
+    inner.columnconfigure(0, weight=1)
+    inner.columnconfigure(1, weight=1)
+
     # 联盟设置
-    league_frame = section_frame(parent, "联盟设置")
+    league_frame = section_frame(left_col, "联盟设置")
     _, size_var = labeled_input(league_frame, "联盟规模", str(cfg["league"]["size"]))
     _, rounds_var = labeled_input(league_frame, "选秀轮数", str(cfg["league"]["rounds"]))
 
     # 打者评分权重
-    hitter_frame = section_frame(parent, "打者评分权重")
+    hitter_frame = section_frame(left_col, "打者评分权重")
     hitter_vars = {}
     for stat, w in cfg["league"]["scoring"]["hitters"].items():
         _, v = labeled_input(hitter_frame, stat, str(w))
         hitter_vars[stat] = v
 
     # 投手评分权重
-    pitcher_frame = section_frame(parent, "投手评分权重")
+    pitcher_frame = section_frame(left_col, "投手评分权重")
     pitcher_vars = {}
     for stat, w in cfg["league"]["scoring"]["pitchers"].items():
         _, v = labeled_input(pitcher_frame, stat, str(w))
         pitcher_vars[stat] = v
 
     # 阵容槽位
-    roster_frame = section_frame(parent, "阵容槽位")
+    roster_frame = section_frame(right_col, "阵容槽位")
     roster_vars = {}
     for pos, count in cfg["league"]["roster_slots"].items():
         _, v = labeled_input(roster_frame, pos, str(count), width=5)
         roster_vars[pos] = v
 
     # 选秀策略
-    draft_frame = section_frame(parent, "选秀策略")
+    draft_frame = section_frame(right_col, "选秀策略")
     _, strategy_var = labeled_combobox(
         draft_frame, "默认策略",
         ["balanced", "conservative", "aggressive"],
@@ -61,7 +90,7 @@ def create_tab(parent: tk.Widget, app) -> None:
     )
 
     # 评分与风险（修复 M6：新增）
-    adv_frame = section_frame(parent, "评分与风险")
+    adv_frame = section_frame(right_col, "评分与风险")
     _, stream_var = labeled_input(
         adv_frame, "stream席位数",
         str(cfg.get("scoring", {}).get("stream_slots", 5)), width=5,
@@ -73,11 +102,11 @@ def create_tab(parent: tk.Widget, app) -> None:
     ttk.Label(
         adv_frame,
         text="（stream 席位：日替/轮换位置的球员数，影响动态替代水平；风险系数越大 upside/floor 差异越大）",
-        foreground="gray",
+        foreground="gray", wraplength=280, justify=tk.LEFT,
     ).pack(anchor=tk.W)
 
     # SGP 分母（修复 M6：新增，12 队经验值为默认）
-    sgp_frame = section_frame(parent, "SGP 分母（每升一名所需统计量，12 队经验值）")
+    sgp_frame = section_frame(right_col, "SGP 分母（每升一名所需统计量，12 队经验值）")
     sgp_hitter_vars = {}
     for stat, d in cfg.get("sgp", {}).get("denominators", {}).get("hitters", {}).items():
         _, v = labeled_input(sgp_frame, stat, str(d), width=8)
@@ -87,9 +116,9 @@ def create_tab(parent: tk.Widget, app) -> None:
         _, v = labeled_input(sgp_frame, stat, str(d), width=8)
         sgp_pitcher_vars[stat] = v
 
-    # 保存按钮
-    btn_frame = ttk.Frame(parent)
-    btn_frame.pack(pady=8)
+    # 保存按钮（横跨两列）
+    btn_frame = ttk.Frame(inner)
+    btn_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 4))
 
     def save():
         try:

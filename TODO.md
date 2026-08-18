@@ -102,42 +102,51 @@
 
 ---
 
+## 📋 待实施
+
+### P4a：ESPN 联盟平台接入（FA 池 + 阵容自动同步）
+- **状态**：方案已定稿，待实施 → 详见 [PLAN_P4_LEAGUE_PLATFORM.md](PLAN_P4_LEAGUE_PLATFORM.md)
+- **结论**：ESPN Fantasy API v3 已实测可用（公开联盟免认证，私盟需 SWID/espn_s2 cookie）；统一 LeagueProvider 抽象同时覆盖 Yahoo
+- **实施顺序**（8 步）：
+  1. 用户机器 curl 验证 ESPN 连通性
+  2. `data_fetch/league_api.py`（LeagueProvider 抽象 + ESPNProvider）+ `tests/test_espn.py`
+  3. config 新增 `league_platform` 段 + GUI「联盟平台绑定」区
+  4. `RealTimeData` 改造（FA 池同步走 ESPN / 新增阵容同步）+ GUI/CLI 接入
+  5. 全套测试 + USER_GUIDE 文档 + 提交
+
+---
+
 ## ⏸️ 已暂缓
 
-### P4：联盟平台 API 对接
-- **状态**：暂缓 — Yahoo 需要特殊网络条件才能访问
-- **目标**：对接 ESPN / Yahoo 联盟 API，实现全自动 FA 池 + 用户阵容同步
+### P4b：Yahoo 联盟平台 API 对接
+- **状态**：暂缓 — 2026-08-17 已实测确认：Yahoo 自 2021-11-01 起屏蔽中国大陆 IP（curl 与真实浏览器均返回官方公告页），需代理 + OAuth 2.0
+- **目标**：在 LeagueProvider 抽象下实现 YahooProvider（OAuth 2.0 认证 + `fantasysports.yahooapis.com`，XML 响应），挂上代理即可用
+- **背景**：Yahoo Fantasy 需要注册 Developer 应用获取 client_id/secret，用户 OAuth 授权后拉联盟数据；网络层需支持 HTTP(S)_PROXY
+- **其他平台**：Sleeper API 不支持棒球（仅 NFL/NBA/LCS），排除
 
-#### 背景
+#### 背景（整体）
 当前 FA 池和用户阵容已支持 CSV 手动导入（P2 + P3 已完成），但要获得"自己联盟里谁没被选"的真实 FA 池，需要对接联盟平台。每个平台的 FA 池因联盟而异，没有统一公开数据源。
 
-#### 需要做的事
-1. **ESPN Fantasy API**（无官方认证，逆向工程，社区有成熟方案）
-   - 端点：`lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons/{year}/...`
-   - 拉取联盟 roster → 推算 FA 池（全量球员 - 已选球员）
-   - 参考：`cwendt94/espn-api` Python 库
-
-2. **Yahoo Fantasy API**（OAuth 2.0 认证）
-   - 需注册 Yahoo Developer 应用获取 client_id/secret
-   - 用户授权后拉联盟数据
-   - 访问可能需要特殊网络条件（用户反馈）
-
-3. **Sleeper API**（不支持棒球，仅 NFL/NBA/LCS）
-   - 排除，不适用于本项目
-
-#### 实施方案（待定）
-- 新建 `data_fetch/league_api.py`，按平台分别实现
-- GUI 加"绑定联盟"配置（输入联盟 ID + 平台）
-- 定期同步 FA 池 + 用户阵容到数据库
-
 #### 优先级
-低 — 手动 CSV 导入已满足基本需求，全自动同步是锦上添花。
+中 — 手动 CSV 导入已满足基本需求，自动同步显著提升 FA 分析可用性（P4a/ESPN 先行）。
 
 ---
 
 ## ✅ 已完成项
 
 以下在本次开发中已实现，记录在此供追溯：
+
+### 2026-08-18 完成（代码审计修复：11 高危 + 中危清理）
+- [x] 高危 2 项（上轮改动引入）：save_config_values 跨段覆盖（SGP 分母改写评分权重，实测复现）；analysis.py 准备ADP NameError
+- [x] 高危：VORP 替代水平分位数方向颠倒（quantile(1-q)）；SGP 缺列 fillna(0) 零产量（按定义反推 ER/K/H+BB/AB，反推不了记 NaN）
+- [x] 高危：价值股标记方向反（reach↔滑落）；阵容验证全联盟口径（is_user_pick/team_id 过滤）
+- [x] 高危：user_roster 外键死循环（去 FK，迁移只跑一次 + 恢复记日志 + busy_timeout 30s）
+- [x] 高危：伤病解析三连错（activated 复出/转投取 to-the 天数/队名动词）；DH→UTIL 评分归零；蒙特卡洛 SGP 池 KeyError
+- [x] 中危清理：GUI 轮询链容错（after 进 finally + error 回调包裹）、每任务独立取消信号、并发进度条计数、7 个 tab 跨线程 Tk 取值改 UI 线程
+- [x] 中危清理：多源融合 NaN 权重归一化；负 VORP upside/floor 方向；statcast_score 恒饱和改相对分；need_factor 位置归一化（CF/DH/P）；风险偏好幂缩放真正生效
+- [x] 中危清理：CLI import-pool 空参守卫；插件 sys.modules 前缀注册防劫持；fetch_injuries 网络失败抛异常（死代码激活）；mock 统计带 is_mock 标记（GUI 显示"示例数据"）
+- [x] 中危清理：eligible_pos 多位置资格接线（schema+ingestor，曾为死代码）；类别平衡跨量纲归一化；Linux zoomed TclError 守卫
+- 测试：145 → 178 passed（新增 33 个回归测试）
 
 ### 2026-08-17 完成（第三波修复：剩余审计项）
 - [x] L2 错误信息中文化（gui/errors.py friendly_error：常见网络/文件/数值异常→中文说明，附原始详情）

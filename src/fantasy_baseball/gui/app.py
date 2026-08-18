@@ -251,6 +251,35 @@ class FantasyBaseballGUI:
                 self._progress.pack_forget()
             if self._cancel_btn is not None:
                 self._cancel_btn.pack_forget()
+        self._set_busy_ui(on)
+
+    def _set_busy_ui(self, busy: bool) -> None:
+        """任务运行期间的全局忙碌反馈。
+
+        手表光标 + 禁用全部动作按钮（长任务期间防误触重复启动，
+        之前可以连点导致并发任务互相干扰）；取消按钮除外。
+        """
+        try:
+            self.root.config(cursor="watch" if busy else "")
+        except tk.TclError:
+            pass  # 窗口销毁竞态，忽略
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                try:
+                    if (
+                        isinstance(child, (ttk.Button, tk.Button))
+                        and child is not self._cancel_btn
+                    ):
+                        child.configure(state="disabled" if busy else "normal")
+                except tk.TclError:
+                    pass
+                walk(child)
+
+        try:
+            walk(self.root)
+        except tk.TclError:
+            pass  # 窗口销毁竞态，忽略
 
 
 def run_gui() -> None:

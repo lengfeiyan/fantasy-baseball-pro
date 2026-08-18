@@ -191,6 +191,24 @@ class TestConcurrentTasks:
         assert results == ["ok"]
         assert len(popups) >= 1  # on_error 崩溃被兜底弹窗报告
 
+    def test_busy_ui_disables_buttons(self, gui_app):
+        """忙碌反馈（审计后用户体验项）：任务期间手表光标 + 按钮禁用防误触。"""
+        from tkinter import ttk
+
+        btn = ttk.Button(gui_app.root, text="测试按钮")
+        btn.pack()
+        assert str(btn["state"]) == "normal"
+
+        t = gui_app.run_async(lambda: (time.sleep(0.2), "ok")[1])
+        # run_async 在 UI 线程内同步开启忙碌状态（无需等 worker）
+        assert str(btn["state"]) == "disabled"
+        assert str(gui_app.root["cursor"]) == "watch"
+
+        _process_events(gui_app, timeout=2.0)
+        # 任务结束后恢复
+        assert str(btn["state"]) == "normal"
+        assert str(gui_app.root["cursor"]) in ("", "arrow")
+
 
 # ============================================================
 # 各 tab 模块可调用性测试

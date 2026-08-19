@@ -148,6 +148,11 @@
 - [x] 中危清理：eligible_pos 多位置资格接线（schema+ingestor，曾为死代码）；类别平衡跨量纲归一化；Linux zoomed TclError 守卫
 - 测试：145 → 178 passed（新增 33 个回归测试）
 
+### 2026-08-18 完成（GUI 体验打磨，实测反馈驱动）
+- [x] 任务期间全局忙碌反馈：手表光标 + 全窗口按钮禁用防重复点击（长任务 20-40s 曾可连点出并发任务）
+- [x] 配置设置页展示不全：改双列布局 + Canvas 滚动（M6 补全后 7 区块 30+ 行输入框单列超屏）
+- 测试：179 passed
+
 ### 2026-08-17 完成（第三波修复：剩余审计项）
 - [x] L2 错误信息中文化（gui/errors.py friendly_error：常见网络/文件/数值异常→中文说明，附原始详情）
 - [x] M5 Sleeper Statcast 走真实 API（无文件时 search_player + StatcastFetcher，带缓存）

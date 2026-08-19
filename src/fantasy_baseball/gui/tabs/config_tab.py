@@ -42,42 +42,44 @@ def create_tab(parent: tk.Widget, app) -> None:
     canvas.bind("<Enter>", lambda e: parent.bind_all("<MouseWheel>", _on_wheel))
     canvas.bind("<Leave>", lambda e: parent.unbind_all("<MouseWheel>"))
 
-    # 双列布局，进一步压缩高度
-    left_col = ttk.Frame(inner)
-    left_col.grid(row=0, column=0, sticky="nw", padx=(0, 10))
-    right_col = ttk.Frame(inner)
-    right_col.grid(row=0, column=1, sticky="nw")
-    inner.columnconfigure(0, weight=1)
-    inner.columnconfigure(1, weight=1)
+    # 三列布局：SGP 分母独占一列（10 行输入，与其他两列高度相近）
+    col1 = ttk.Frame(inner)
+    col1.grid(row=0, column=0, sticky="nw", padx=(0, 10))
+    col2 = ttk.Frame(inner)
+    col2.grid(row=0, column=1, sticky="nw", padx=(0, 10))
+    col3 = ttk.Frame(inner)
+    col3.grid(row=0, column=2, sticky="nw")
+    for i in range(3):
+        inner.columnconfigure(i, weight=1)
 
     # 联盟设置
-    league_frame = section_frame(left_col, "联盟设置")
+    league_frame = section_frame(col1, "联盟设置")
     _, size_var = labeled_input(league_frame, "联盟规模", str(cfg["league"]["size"]))
     _, rounds_var = labeled_input(league_frame, "选秀轮数", str(cfg["league"]["rounds"]))
 
     # 打者评分权重
-    hitter_frame = section_frame(left_col, "打者评分权重")
+    hitter_frame = section_frame(col1, "打者评分权重")
     hitter_vars = {}
     for stat, w in cfg["league"]["scoring"]["hitters"].items():
         _, v = labeled_input(hitter_frame, stat, str(w))
         hitter_vars[stat] = v
 
     # 投手评分权重
-    pitcher_frame = section_frame(left_col, "投手评分权重")
+    pitcher_frame = section_frame(col1, "投手评分权重")
     pitcher_vars = {}
     for stat, w in cfg["league"]["scoring"]["pitchers"].items():
         _, v = labeled_input(pitcher_frame, stat, str(w))
         pitcher_vars[stat] = v
 
     # 阵容槽位
-    roster_frame = section_frame(right_col, "阵容槽位")
+    roster_frame = section_frame(col2, "阵容槽位")
     roster_vars = {}
     for pos, count in cfg["league"]["roster_slots"].items():
         _, v = labeled_input(roster_frame, pos, str(count), width=5)
         roster_vars[pos] = v
 
     # 选秀策略
-    draft_frame = section_frame(right_col, "选秀策略")
+    draft_frame = section_frame(col2, "选秀策略")
     _, strategy_var = labeled_combobox(
         draft_frame, "默认策略",
         ["balanced", "conservative", "aggressive"],
@@ -90,7 +92,7 @@ def create_tab(parent: tk.Widget, app) -> None:
     )
 
     # 评分与风险（修复 M6：新增）
-    adv_frame = section_frame(right_col, "评分与风险")
+    adv_frame = section_frame(col2, "评分与风险")
     _, stream_var = labeled_input(
         adv_frame, "stream席位数",
         str(cfg.get("scoring", {}).get("stream_slots", 5)), width=5,
@@ -102,23 +104,30 @@ def create_tab(parent: tk.Widget, app) -> None:
     ttk.Label(
         adv_frame,
         text="（stream 席位：日替/轮换位置的球员数，影响动态替代水平；风险系数越大 upside/floor 差异越大）",
-        foreground="gray", wraplength=280, justify=tk.LEFT,
+        foreground="gray", wraplength=260, justify=tk.LEFT,
     ).pack(anchor=tk.W)
 
-    # SGP 分母（修复 M6：新增，12 队经验值为默认）
-    sgp_frame = section_frame(right_col, "SGP 分母（每升一名所需统计量，12 队经验值）")
+    # SGP 分母（独占第三列，修复 M6：新增，12 队经验值为默认）
+    sgp_frame = section_frame(col3, "SGP 分母")
+    ttk.Label(
+        sgp_frame,
+        text="每升一名所需统计量（12 队经验值，计数类按联盟规模自动缩放）",
+        foreground="gray", wraplength=240, justify=tk.LEFT,
+    ).pack(anchor=tk.W, pady=(0, 4))
+    ttk.Label(sgp_frame, text="打者", font=("", 9, "bold")).pack(anchor=tk.W)
     sgp_hitter_vars = {}
     for stat, d in cfg.get("sgp", {}).get("denominators", {}).get("hitters", {}).items():
         _, v = labeled_input(sgp_frame, stat, str(d), width=8)
         sgp_hitter_vars[stat] = v
+    ttk.Label(sgp_frame, text="投手", font=("", 9, "bold")).pack(anchor=tk.W, pady=(6, 0))
     sgp_pitcher_vars = {}
     for stat, d in cfg.get("sgp", {}).get("denominators", {}).get("pitchers", {}).items():
         _, v = labeled_input(sgp_frame, stat, str(d), width=8)
         sgp_pitcher_vars[stat] = v
 
-    # 保存按钮（横跨两列）
+    # 保存按钮（横跨三列）
     btn_frame = ttk.Frame(inner)
-    btn_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 4))
+    btn_frame.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 4))
 
     def save():
         try:

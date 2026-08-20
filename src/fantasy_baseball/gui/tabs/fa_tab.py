@@ -129,7 +129,10 @@ def create_tab(parent: tk.Widget, app) -> None:
             )
             if not result:
                 return None
-            return rec.export_recommendations(result, "fa_recommendations.csv")
+            return rec.export_recommendations(
+                result, "fa_recommendations.csv",
+                method=method, risk_preference=risk,
+            )
 
         def _done(path):
             if path:

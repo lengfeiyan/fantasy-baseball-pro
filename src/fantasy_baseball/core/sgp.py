@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-from ..config import get_config, get_season, output_path
+from ..config import get_config, get_season, history_path, output_path
 from ..db import PlayerRepository, db_session
 from ..utils.logger import get_logger
 
@@ -198,11 +198,11 @@ class SGPModel:
 
     # -------------------------------------------------------------- 生成排名
     def generate_rankings(self, output_file: Optional[str] = None) -> str:
-        """生成 SGP 排名 CSV，返回路径。"""
+        """生成 SGP 排名并持久化（DB + 时间戳备份 + 最近一份同名 CSV）。"""
+        season = get_season()
         if output_file is None:
             # 修复 H7：文件名跟随生效赛季，不再硬编码 2026
-            output_file = f"fantasy_draft_rankings_sgp_{get_season()}.csv"
-        path = output_path(output_file)
+            output_file = f"fantasy_draft_rankings_sgp_{season}.csv"
 
         df = self.calculate_sgp()
         # 保留关键列
@@ -210,7 +210,28 @@ class SGPModel:
         keep += [c for c in ["sgp_R", "sgp_HR", "sgp_RBI", "sgp_SB", "sgp_AVG",
                              "sgp_W", "sgp_SV", "sgp_K", "sgp_ERA", "sgp_WHIP"]
                  if c in df.columns]
-        df[[c for c in keep if c in df.columns]].to_csv(path, index=False)
+        out = df[[c for c in keep if c in df.columns]]
+
+        # 1. DB（当前状态；sgp_rank 统一映射到 rank 列）
+        try:
+            from ..db import RankingsRepository, db_session
+
+            rows = out.rename(columns={"sgp_rank": "rank"}).to_dict("records")
+            with db_session() as conn:
+                RankingsRepository(conn).replace_method("sgp", season, rows)
+            logger.info("SGP 排名已写入数据库（%d 名球员）", len(rows))
+        except Exception as e:
+            logger.warning("SGP 排名写入数据库失败: %s", e)
+
+        # 2. CSV：最近一份（同名覆盖）+ 时间戳历史备份
+        path = output_path(output_file)
+        out.to_csv(path, index=False)
+        try:
+            backup = history_path(output_file)
+            out.to_csv(backup, index=False)
+        except OSError as e:
+            logger.warning("写入 SGP 排名历史备份失败: %s", e)
+
         logger.info("SGP 排名已保存: %s", path)
         return path
 

@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from ..config import get_config, output_path
+from ..config import get_config, history_path, output_path
 from ..utils.logger import get_logger
 from .adp import ADPCache
 from .scoring import ScoringModel
@@ -121,17 +121,45 @@ class SnakeDraftSimulator:
         output_file: Optional[str] = None,
         log_df: Optional[pd.DataFrame] = None,
     ) -> str:
-        """模拟并保存日志到 CSV，返回绝对路径。
+        """模拟并持久化选秀日志（DB 会话 + 时间戳备份 + 最近一份同名 CSV）。
 
-        修复 L1：此前 GUI 先调 simulate_draft 展示、再调 simulate_and_save 保存，
-        导致选秀被执行两遍（两次结果可能不一致）。现支持传入已算好的 log_df。
+        修复 L1：支持传入已算好的 log_df，避免选秀被执行两遍。
+        一次模拟在 DB 里是一个 session_id（支持多顺位模拟的历史对比）。
+
+        Returns:
+            「最近一份」CSV 的绝对路径。
         """
         if log_df is None:
             log_df = self.simulate_draft(user_pick, strategy)
+        strategy = strategy or self.default_strategy
         if output_file is None:
-            output_file = f"draft_log_pick{user_pick}_{strategy or self.default_strategy}.csv"
+            output_file = f"draft_log_pick{user_pick}_{strategy}.csv"
+
+        # 1. DB（会话式追加）
+        import datetime as _dt
+
+        session_id = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        try:
+            from ..db import DraftLogRepository, db_session
+
+            with db_session() as conn:
+                DraftLogRepository(conn).save_session(
+                    session_id, log_df.to_dict("records"),
+                    method=self.method, strategy=strategy, user_pick=user_pick,
+                )
+            logger.info("选秀日志已写入数据库（会话 %s，%d 次选择）", session_id, len(log_df))
+        except Exception as e:
+            logger.warning("选秀日志写入数据库失败: %s", e)
+
+        # 2. CSV：最近一份（同名覆盖）+ 时间戳历史备份
         path = output_path(output_file)
         log_df.to_csv(path, index=False)
+        try:
+            backup = history_path(output_file)
+            log_df.to_csv(backup, index=False)
+        except OSError as e:
+            logger.warning("写入选秀日志历史备份失败: %s", e)
+
         logger.info("选秀日志已保存: %s", path)
         return path
 

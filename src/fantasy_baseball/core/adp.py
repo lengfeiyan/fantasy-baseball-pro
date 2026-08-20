@@ -251,14 +251,23 @@ def fetch_real_adp(url: str = FANTASYPROS_URL) -> pd.DataFrame:
 class ADPCache:
     """ADP 缓存管理。
 
-    优先级：内存缓存 → 本地 CSV 缓存（未过期）→ 在线抓取 → mock 降级。
+    优先级：内存 → 数据库快照（未过期）→ 本地 CSV（旧版回退，未过期）
+    → 在线抓取（写库 + 时间戳备份）→ mock 降级（永不落盘/落库）。
     """
 
-    def __init__(self, adp_file: Optional[str] = None, cache_ttl_hours: Optional[int] = None):
+    def __init__(
+        self,
+        adp_file: Optional[str] = None,
+        cache_ttl_hours: Optional[int] = None,
+        use_db: bool = True,
+    ):
         cfg = get_config()
         self.adp_file = resolve_path(adp_file or cfg["draft_simulator"]["adp_file"])
         ttl = cache_ttl_hours if cache_ttl_hours is not None else DEFAULT_CACHE_TTL_HOURS
         self.cache_ttl = ttl * 3600
+        # DB 是默认管线的存储；显式指定 adp_file（测试/隔离场景）时自动关闭，
+        # 避免临时 CSV 与真实库互相污染
+        self.use_db = use_db and adp_file is None
         self._df: Optional[pd.DataFrame] = None
 
     def fetch_adp(self, force: bool = False, allow_network: bool = True) -> pd.DataFrame:
@@ -271,47 +280,119 @@ class ADPCache:
         if self._df is not None and not force:
             return self._df
 
-        # 1. 本地 CSV 缓存（未过期）
+        # 1. 数据库快照（未过期）
+        if not force and self.use_db:
+            df = self._load_from_db()
+            if df is not None and not df.empty:
+                logger.info("从数据库加载 ADP（%d 条）", len(df))
+                self._df = df
+                return self._df
+
+        # 2. 本地 CSV 缓存（旧版回退，未过期）
         if not force and self._cache_valid():
             try:
                 self._df = pd.read_csv(self.adp_file)
                 if not self._df.empty:
                     logger.info("从缓存加载 ADP: %s（%d 条）", self.adp_file, len(self._df))
+                    self._backfill_db_from_csv(self._df)
                     return self._df
             except Exception as e:
                 logger.warning("读取 ADP 缓存失败: %s", e)
 
-        # 2. 在线抓取真实数据
+        # 3. 在线抓取真实数据 → 写库 + 时间戳备份
         if allow_network:
             try:
                 self._df = fetch_real_adp()
-                self._save_cache(self._df)
+                self._save_all(self._df)
                 return self._df
             except Exception as e:
                 logger.warning("抓取真实 ADP 失败，降级到 mock 数据: %s", e)
 
-        # 3. mock 降级
+        # 4. mock 降级
         logger.info("使用内置 mock ADP 数据（%d 条）", len(_MOCK_ADP))
         self._df = pd.DataFrame(_MOCK_ADP)
-        # 修复 H3：mock 数据**永不写盘**（只驻留内存）。
+        # 修复 H3：mock 数据**永不写盘/落库**（只驻留内存）。
         # 避免首次离线运行写入 mock 后，恢复联网的 12 小时 TTL 内仍读到 mock，
         # 也避免 force 刷新时用 mock 覆盖已有真实数据。
-        # 代价：每次离线启动都重新构造 mock（25 条，成本可忽略）。
         return self._df
+
+    # -------------------------------------------------------------- DB 存取
+    def _load_from_db(self) -> Optional[pd.DataFrame]:
+        """从数据库读未过期的 ADP 快照；无数据/过期/出错返回 None。"""
+        try:
+            from ..db import AdpRepository, db_session
+
+            with db_session() as conn:
+                repo = AdpRepository(conn)
+                ts = repo.latest_fetch_time()
+                if ts is None or self._age_seconds(ts) >= self.cache_ttl:
+                    return None
+                df = repo.get_all()
+        except Exception as e:
+            logger.warning("从数据库读取 ADP 失败: %s", e)
+            return None
+        keep = [c for c in ("name", "team", "pos", "adp") if c in df.columns]
+        return df[keep]
+
+    @staticmethod
+    def _age_seconds(ts: str) -> float:
+        """SQLite CURRENT_TIMESTAMP（UTC）距今的秒数；解析失败视为已过期。"""
+        import calendar
+        from datetime import datetime as _dt
+
+        try:
+            epoch = calendar.timegm(
+                _dt.strptime(str(ts)[:19], "%Y-%m-%d %H:%M:%S").timetuple()
+            )
+            return time.time() - epoch
+        except (ValueError, TypeError):
+            return float("inf")
+
+    def _save_all(self, df: pd.DataFrame) -> None:
+        """抓取成功后的持久化：DB（当前状态）+ 时间戳备份（历史快照）。"""
+        if self.use_db:
+            try:
+                from ..db import AdpRepository, db_session
+
+                rows = df.to_dict("records")
+                with db_session() as conn:
+                    AdpRepository(conn).replace_all(rows)
+                logger.info("ADP 已写入数据库（%d 条）", len(df))
+            except Exception as e:
+                logger.warning("ADP 写入数据库失败: %s", e)
+        try:
+            from ..config import history_path
+
+            path = history_path("adp.csv")
+            df.to_csv(path, index=False)
+            logger.info("ADP 历史备份: %s", path)
+        except OSError as e:
+            logger.warning("写入 ADP 备份失败: %s", e)
+
+    def _backfill_db_from_csv(self, df: pd.DataFrame) -> None:
+        """DB 为空且读到有效 CSV 时，把 CSV 数据回填入库（一次性迁移）。
+
+        让数据库尽快成为权威源；已有 DB 数据时不动作（不覆盖新状态）。
+        """
+        if not self.use_db:
+            return
+        try:
+            from ..db import AdpRepository, db_session
+
+            with db_session() as conn:
+                repo = AdpRepository(conn)
+                if repo.count() > 0:
+                    return
+                repo.replace_all(df.to_dict("records"))
+            logger.info("已从 CSV 回填 ADP 到数据库（%d 条）", len(df))
+        except Exception as e:
+            logger.debug("ADP 回填数据库失败（忽略）: %s", e)
 
     def _cache_valid(self) -> bool:
         if not os.path.exists(self.adp_file):
             return False
         age = time.time() - os.path.getmtime(self.adp_file)
         return age < self.cache_ttl
-
-    def _save_cache(self, df: pd.DataFrame) -> None:
-        try:
-            os.makedirs(os.path.dirname(self.adp_file), exist_ok=True)
-            df.to_csv(self.adp_file, index=False)
-            logger.info("ADP 已缓存到: %s", self.adp_file)
-        except OSError as e:
-            logger.warning("写入 ADP 缓存失败: %s", e)
 
     def get_player_adp(self, name: str, allow_network: bool = True) -> Optional[float]:
         """查询单个球员的 ADP，未找到返回 None。

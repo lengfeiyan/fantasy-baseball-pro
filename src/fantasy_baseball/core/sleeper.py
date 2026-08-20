@@ -88,8 +88,18 @@ def find_sleepers(
 
 
 def _load_rankings(rankings_file: Optional[str], season: int) -> pd.DataFrame:
-    """加载排名 CSV；未提供则现算。"""
+    """加载 VORP 排名：DB 快照优先 → CSV 回退 → 现算。"""
     if rankings_file is None:
+        try:
+            from ..db import RankingsRepository, db_session
+
+            with db_session() as conn:
+                df = RankingsRepository(conn).get_latest("vorp")
+            if not df.empty:
+                logger.info("从数据库加载 VORP 排名（%d 名球员）", len(df))
+                return df
+        except Exception as e:
+            logger.debug("从数据库读取排名失败，回退 CSV: %s", e)
         rankings_file = f"fantasy_draft_rankings_vorp_{season}.csv"
     path = find_output_file(rankings_file)
     if os.path.exists(path):

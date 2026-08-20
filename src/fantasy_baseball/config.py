@@ -211,6 +211,23 @@ def output_path(filename: str) -> str:
     return os.path.join(out_dir, os.path.basename(filename))
 
 
+def history_path(filename: str) -> str:
+    """生成带时间戳的历史备份路径：output/history/<名>_<YYYYMMDD_HHMMSS>.csv。
+
+    数据统一入库后，CSV 从"最新数据"降级为"历史快照"：每次生成写一个
+    时间戳文件，不再覆盖；DB 始终保存当前状态。
+    """
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base = os.path.basename(filename)
+    if base.lower().endswith(".csv"):
+        stem = base[:-4]
+    else:
+        stem = base
+    history_dir = os.path.join(PROJECT_ROOT, "output", "history")
+    os.makedirs(history_dir, exist_ok=True)
+    return os.path.join(history_dir, f"{stem}_{stamp}.csv")
+
+
 def find_output_file(filename: str) -> str:
     """定位输出/数据文件：优先 output/ 目录，其次项目根（兼容旧文件）。
 

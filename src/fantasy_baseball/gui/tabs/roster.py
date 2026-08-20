@@ -146,6 +146,50 @@ def create_tab(parent: tk.Widget, app) -> None:
 
         app.run_async(_work, on_done=_done, on_error=_error, status="导入阵容...")
 
+    def do_import_latest():
+        """从数据库最近一次选秀模拟导入阵容（无需选 CSV 文件）。"""
+        def _work():
+            app.post("从数据库读取最近一次模拟...")
+            from ...db import DraftLogRepository
+
+            with db_session() as conn:
+                df = DraftLogRepository(conn).latest_session()
+            if df.empty:
+                raise FileNotFoundError(
+                    "数据库中还没有选秀模拟记录。先去「选秀中心」跑一次模拟，"
+                    "或使用上方「从日志导入」。"
+                )
+
+            # 会话内按 is_user_pick 提取用户球队（模拟时写入的标记）
+            if "is_user_pick" in df.columns:
+                user_df = df[df["is_user_pick"] == 1]
+            else:
+                user_df = df
+            if user_df.empty:
+                raise ValueError("最近一次模拟中没有用户球队的选择记录")
+
+            rows = []
+            for _, r in user_df.iterrows():
+                rows.append({
+                    "name": r.get("name"),
+                    "team": r.get("team_name", ""),
+                    "pos": r.get("pos"),
+                    "status": "active",
+                })
+            with db_session() as conn:
+                n = RosterRepository(conn).replace_all(rows)
+            return n
+
+        def _done(n):
+            set_text(output, f"[完成] 已从最近一次模拟导入 {n} 名球员到阵容\n点击「查看阵容」确认。")
+            app.set_status("阵容导入完成")
+            messagebox.showinfo("成功", f"已导入 {n} 名球员")
+
+        def _error(e):
+            messagebox.showerror("错误", friendly_error(e))
+
+        app.run_async(_work, on_done=_done, on_error=_error, status="导入最近模拟...")
+
     def do_show():
         """查看当前阵容 + 位置填充状态。"""
         with db_session() as conn:
@@ -192,6 +236,7 @@ def create_tab(parent: tk.Widget, app) -> None:
         set_text(output, "阵容已清空。")
         app.set_status("阵容已清空")
 
+    action_button(btn_roster_frame, "从最近模拟导入", do_import_latest)
     action_button(btn_roster_frame, "从选秀日志导入", do_import)
     action_button(btn_roster_frame, "查看阵容", do_show)
     action_button(btn_roster_frame, "清空阵容", do_clear)

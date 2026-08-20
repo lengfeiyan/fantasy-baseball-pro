@@ -126,7 +126,9 @@ python -m fantasy_baseball sleeper --min-adp 100 --max-adp 400
 python -m fantasy_baseball mlb "Aaron Judge" --statcast
 ```
 
-> 所有输出文件（排名 CSV、选秀日志、FA 推荐导出）统一存放在 `output/` 目录，不再散落在项目根目录。
+> **数据存储**：所有数据（预测/ADP/排名/选秀日志/FA 推荐/伤病/阵容）都以数据库
+> `fantasy_baseball.db` 为唯一当前数据源；同时在 `output/` 留一份同名"最近一次" CSV，
+> 并在 `output/history/` 写入带时间戳的历史备份（永不覆盖，可追溯每一次生成）。
 
 或者直接启动 GUI：
 

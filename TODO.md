@@ -136,6 +136,15 @@
 
 以下在本次开发中已实现，记录在此供追溯：
 
+### 2026-08-20 完成（数据统一入库）
+- [x] DB 成为唯一当前数据源：新增 adp/rankings/draft_logs/fa_recommendations 四张表 + 四个仓储
+- [x] ADP 管道：DB 优先（TTL 看 fetched_at）→ CSV 回退 → 抓取写库；CSV 有效且 DB 空时自动回填
+- [x] 排名双写（VORP/SGP 按 method 快照替换）；Sleeper/分析页「查看排名」改 DB 优先
+- [x] 选秀日志/FA 推荐会话式入库（一次模拟/推荐一个 session_id，支持历史对比）
+- [x] CSV 降级为备份：output/history/ 时间戳文件（永不覆盖）+ output/ 同名"最近一次"
+- [x] 阵容页新增「从最近模拟导入」按钮（直接读 DB 最新会话，无需选文件）
+- [x] 测试 179 → 191 passed（新增 12 个管道测试 + isolated_db/isolated_history 隔离 fixture）
+
 ### 2026-08-18 完成（代码审计修复：11 高危 + 中危清理）
 - [x] 高危 2 项（上轮改动引入）：save_config_values 跨段覆盖（SGP 分母改写评分权重，实测复现）；analysis.py 准备ADP NameError
 - [x] 高危：VORP 替代水平分位数方向颠倒（quantile(1-q)）；SGP 缺列 fillna(0) 零产量（按定义反推 ER/K/H+BB/AB，反推不了记 NaN）

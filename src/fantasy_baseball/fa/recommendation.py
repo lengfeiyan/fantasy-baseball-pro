@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from ..config import get_config
+from ..config import get_config, history_path, output_path
 from ..db import RosterRepository, db_session
 from ..utils.logger import get_logger
 from .analyzer import FAAnalyzer
@@ -174,11 +174,13 @@ class RecommendationSystem:
 
     # -------------------------------------------------------------- 导出
     def export_recommendations(
-        self, recommendations: List[Dict[str, Any]], output_file: str
+        self,
+        recommendations: List[Dict[str, Any]],
+        output_file: str,
+        method: str = "vorp",
+        risk_preference: str = "balanced",
     ) -> str:
-        """导出推荐到 CSV，返回绝对路径。"""
-        from ..config import output_path
-
+        """导出推荐并持久化（DB 会话 + 时间戳备份 + 最近一份同名 CSV）。"""
         rows = []
         for r in recommendations:
             row = {
@@ -190,11 +192,37 @@ class RecommendationSystem:
                 "overall_value": r["value"]["overall_value"],
                 "base_score": r["value"]["base_score"],
                 "statcast_score": r["value"]["statcast_score"],
+                "need_factor": r.get("need_factor"),
+                "risk_adjustment": r.get("risk_adjustment"),
+                "is_mock": bool(r.get("is_mock", False)),
             }
             rows.append(row)
         df = pd.DataFrame(rows)
+
+        # 1. DB（会话式追加）
+        import datetime as _dt
+
+        session_id = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        try:
+            from ..db import RecommendationRepository, db_session
+
+            with db_session() as conn:
+                RecommendationRepository(conn).save_session(
+                    session_id, rows, method=method, risk_preference=risk_preference
+                )
+            logger.info("FA 推荐已写入数据库（会话 %s，%d 条）", session_id, len(rows))
+        except Exception as e:
+            logger.warning("FA 推荐写入数据库失败: %s", e)
+
+        # 2. CSV：最近一份 + 时间戳备份
         path = output_path(output_file)
         df.to_csv(path, index=False)
+        try:
+            backup = history_path(output_file)
+            df.to_csv(backup, index=False)
+        except OSError as e:
+            logger.warning("写入 FA 推荐历史备份失败: %s", e)
+
         logger.info("推荐已导出: %s", path)
         return path
 

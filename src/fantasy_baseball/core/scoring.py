@@ -17,7 +17,7 @@ from typing import Optional
 
 import pandas as pd
 
-from ..config import get_config, get_season, output_path
+from ..config import get_config, get_season, history_path, output_path
 from ..db import PlayerRepository, db_session
 from ..utils.logger import get_logger
 
@@ -230,12 +230,16 @@ class ScoringModel:
 
     # -------------------------------------------------------------- 输出排名
     def generate_rankings(self, output_file: Optional[str] = None) -> str:
-        """生成排名 CSV 文件，返回绝对路径。"""
+        """生成排名并持久化（DB 当前状态 + 时间戳历史备份 + 最近一份同名 CSV）。
+
+        Returns:
+            「最近一份」CSV 的绝对路径（时间戳备份在同目录 history/ 子目录）。
+        """
         cfg = get_config()
+        season = get_season(cfg)
         if output_file is None:
-            # 修复 H7：文件名跟随生效赛季，不再硬编码 2026
-            output_file = f"fantasy_draft_rankings_vorp_{get_season(cfg)}.csv"
-        path = output_path(output_file)
+            # 修复 H7：文件名跟随生效赛季，不再硬编码
+            output_file = f"fantasy_draft_rankings_vorp_{season}.csv"
 
         rankings = self.calculate_vorp()
         for col in RANKING_COLUMNS:
@@ -243,7 +247,27 @@ class ScoringModel:
                 rankings[col] = None
         rankings = rankings[RANKING_COLUMNS]
 
+        # 1. DB（当前状态，按 method 整体替换）
+        try:
+            from ..db import RankingsRepository, db_session
+
+            with db_session() as conn:
+                RankingsRepository(conn).replace_method(
+                    "vorp", season, rankings.to_dict("records")
+                )
+            logger.info("VORP 排名已写入数据库（%d 名球员）", len(rankings))
+        except Exception as e:
+            logger.warning("VORP 排名写入数据库失败: %s", e)
+
+        # 2. CSV：最近一份（同名覆盖）+ 时间戳历史备份
+        path = output_path(output_file)
         rankings.to_csv(path, index=False)
+        try:
+            backup = history_path(output_file)
+            rankings.to_csv(backup, index=False)
+        except OSError as e:
+            logger.warning("写入排名历史备份失败: %s", e)
+
         logger.info("排名文件已保存: %s（%d 名球员）", path, len(rankings))
         if len(rankings) > 0:
             top = rankings.iloc[0]

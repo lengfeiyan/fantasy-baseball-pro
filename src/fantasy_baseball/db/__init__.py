@@ -6,9 +6,13 @@
 
 from .connection import db_session, get_connection, init_db
 from .repositories import (
+    AdpRepository,
+    DraftLogRepository,
     FaRepository,
     InjuryRepository,
     PlayerRepository,
+    RankingsRepository,
+    RecommendationRepository,
     RosterRepository,
 )
 from .schema import create_all_tables
@@ -22,4 +26,8 @@ __all__ = [
     "FaRepository",
     "InjuryRepository",
     "RosterRepository",
+    "AdpRepository",
+    "RankingsRepository",
+    "DraftLogRepository",
+    "RecommendationRepository",
 ]

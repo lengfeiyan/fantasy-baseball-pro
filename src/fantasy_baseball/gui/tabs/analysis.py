@@ -107,32 +107,46 @@ def create_tab(parent: tk.Widget, app) -> None:
         )
 
     def show_rankings():
-        """读取排名 CSV 并展示 Top 30。"""
+        """查看排名 Top 30：DB 快照优先，CSV 回退（兼容旧数据）。"""
         import pandas as pd
         method = method_var.get()
-        if method == "sgp":
-            rank_file = f"fantasy_draft_rankings_sgp_{get_season()}.csv"
-            value_col = "sgp_total"
-            rank_col = "sgp_rank"
-            title = "SGP"
-        else:
-            rank_file = f"fantasy_draft_rankings_vorp_{get_season()}.csv"
-            value_col = "vorp"
-            rank_col = "rank"
-            title = "VORP"
+        value_col = "sgp_total" if method == "sgp" else "vorp"
+        title = "SGP" if method == "sgp" else "VORP"
 
-        rank_path = find_output_file(rank_file)
-        if not os.path.exists(rank_path):
-            set_text(output, f"排名文件不存在：{rank_file}\n请先点击「生成排名」。")
-            return
+        df = None
+        # 1. 数据库快照（rank 列在 DB 中统一命名）
+        try:
+            from ...db import RankingsRepository, db_session
 
-        df = pd.read_csv(rank_path)
+            with db_session() as conn:
+                df = RankingsRepository(conn).get_latest(method)
+        except Exception:
+            df = None
+        source = "数据库"
+
+        # 2. CSV 回退（旧数据）
+        if df is None or df.empty:
+            if method == "sgp":
+                rank_file = f"fantasy_draft_rankings_sgp_{get_season()}.csv"
+                rank_col_csv = "sgp_rank"
+            else:
+                rank_file = f"fantasy_draft_rankings_vorp_{get_season()}.csv"
+                rank_col_csv = "rank"
+            rank_path = find_output_file(rank_file)
+            if not os.path.exists(rank_path):
+                set_text(output, f"排名数据不存在（数据库与 {rank_file} 均无）。\n请先点击「生成排名」。")
+                return
+            df = pd.read_csv(rank_path)
+            if "rank" not in df.columns:
+                df = df.rename(columns={rank_col_csv: "rank"})
+            source = "CSV"
+
         top = df.head(30)
-        lines = [f"{title} 排名 Top 30（共 {len(df)} 人）：\n", "-" * 65]
+        lines = [f"{title} 排名 Top 30（共 {len(df)} 人，来源：{source}）：\n", "-" * 65]
         for _, r in top.iterrows():
             lines.append(
-                f"{int(r[rank_col]):>3}. {r['name']:<22} {r.get('pos',''):<5} "
-                f"{value_col}={r[value_col]:>8.2f}"
+                f"{int(r['rank']):>3}. {r['name']:<22} {r.get('pos',''):<5} "
+                f"{value_col}={r.get(value_col, 0):>8.2f}"
             )
         set_text(output, "\n".join(lines))
         app.set_status(f"{title} 排名: {len(df)} 人")

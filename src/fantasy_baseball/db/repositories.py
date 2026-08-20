@@ -254,3 +254,166 @@ class InjuryRepository(_BaseRepository):
 
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM injury_reports").fetchone()[0]
+
+
+class AdpRepository(_BaseRepository):
+    """ADP 快照访问（每次抓取整体替换，永远代表最新一批）。"""
+
+    def replace_all(self, rows: Sequence[Dict[str, Any]]) -> int:
+        """整体替换 ADP 快照（rows 含 name/team/pos/adp，source 可选）。"""
+        self.conn.execute("DELETE FROM adp")
+        if not rows:
+            return 0
+        self.conn.executemany(
+            """INSERT INTO adp(name, team, pos, adp, source)
+               VALUES(?,?,?,?,COALESCE(?, 'FantasyPros'))""",
+            [
+                (r.get("name"), r.get("team"), r.get("pos"), r.get("adp"), r.get("source"))
+                for r in rows
+            ],
+        )
+        return len(rows)
+
+    def get_all(self) -> pd.DataFrame:
+        return pd.read_sql_query("SELECT * FROM adp", self.conn)
+
+    def latest_fetch_time(self) -> Optional[str]:
+        """最新一批的 fetched_at（TTL 判断用）。空表返回 None。"""
+        row = self.conn.execute(
+            "SELECT MAX(fetched_at) FROM adp"
+        ).fetchone()
+        return row[0] if row and row[0] else None
+
+    def count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM adp").fetchone()[0]
+
+
+class RankingsRepository(_BaseRepository):
+    """排名快照访问（按 method 整体替换）。"""
+
+    def replace_method(self, method: str, season: int, rows: Sequence[Dict[str, Any]]) -> int:
+        """替换指定 method 的排名快照（另一 method 不受影响）。"""
+        self.conn.execute("DELETE FROM rankings WHERE method = ?", (method,))
+        if not rows:
+            return 0
+        self.conn.executemany(
+            """INSERT INTO rankings(method, season, rank, name, team, pos, player_type,
+                                   vorp, vorp_upside, vorp_floor, sgp_total)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            [
+                (method, season, r.get("rank"), r.get("name"), r.get("team"),
+                 r.get("pos"), r.get("player_type"), r.get("vorp"),
+                 r.get("vorp_upside"), r.get("vorp_floor"), r.get("sgp_total"))
+                for r in rows
+            ],
+        )
+        return len(rows)
+
+    def get_latest(self, method: str) -> pd.DataFrame:
+        """取指定 method 最新一批的排名（按 generated_at 分组的最新组）。"""
+        return pd.read_sql_query(
+            """SELECT * FROM rankings
+               WHERE method = ?
+                 AND generated_at = (SELECT MAX(generated_at) FROM rankings WHERE method = ?)
+               ORDER BY rank""",
+            self.conn, params=(method, method),
+        )
+
+    def count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM rankings").fetchone()[0]
+
+
+class DraftLogRepository(_BaseRepository):
+    """选秀日志访问（会话式：一次模拟一个 session_id）。"""
+
+    def save_session(
+        self, session_id: str, rows: Sequence[Dict[str, Any]],
+        method: str = "vorp", strategy: str = "balanced", user_pick: int = 1,
+    ) -> int:
+        """写入一次模拟的完整日志（同 session_id 先清后写，保证幂等）。"""
+        self.conn.execute("DELETE FROM draft_logs WHERE session_id = ?", (session_id,))
+        if not rows:
+            return 0
+        self.conn.executemany(
+            """INSERT INTO draft_logs(session_id, method, strategy, user_pick,
+                                      round, pick, team, name, team_name, pos,
+                                      vorp, sgp_total, adp, is_user_pick, is_value_pick)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            [
+                (session_id, method, strategy, user_pick,
+                 r.get("round"), r.get("pick"), r.get("team"), r.get("name"),
+                 r.get("team_name"), r.get("pos"), r.get("vorp"), r.get("sgp_total"),
+                 r.get("adp"),
+                 1 if r.get("is_user_pick") else 0,
+                 1 if r.get("is_value_pick") else 0)
+                for r in rows
+            ],
+        )
+        return len(rows)
+
+    def get_session(self, session_id: str) -> pd.DataFrame:
+        return pd.read_sql_query(
+            "SELECT * FROM draft_logs WHERE session_id = ? ORDER BY pick",
+            self.conn, params=(session_id,),
+        )
+
+    def latest_session_id(self) -> Optional[str]:
+        row = self.conn.execute(
+            "SELECT session_id FROM draft_logs ORDER BY created_at DESC, id DESC LIMIT 1"
+        ).fetchone()
+        return row[0] if row else None
+
+    def latest_session(self) -> pd.DataFrame:
+        """最近一次模拟的日志（GUI「从最近模拟导入阵容」用）。"""
+        sid = self.latest_session_id()
+        if sid is None:
+            return pd.DataFrame()
+        return self.get_session(sid)
+
+    def count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM draft_logs").fetchone()[0]
+
+
+class RecommendationRepository(_BaseRepository):
+    """FA 推荐记录访问（会话式）。"""
+
+    def save_session(
+        self, session_id: str, rows: Sequence[Dict[str, Any]],
+        method: str = "vorp", risk_preference: str = "balanced",
+    ) -> int:
+        self.conn.execute(
+            "DELETE FROM fa_recommendations WHERE session_id = ?", (session_id,)
+        )
+        if not rows:
+            return 0
+        self.conn.executemany(
+            """INSERT INTO fa_recommendations(session_id, method, risk_preference,
+                                             player_id, name, team, pos,
+                                             final_score, overall_value, base_score,
+                                             statcast_score, need_factor, risk_adjustment, is_mock)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            [
+                (session_id, method, risk_preference,
+                 r.get("player_id"), r.get("name"), r.get("team"), r.get("pos"),
+                 r.get("final_score"), r.get("overall_value"), r.get("base_score"),
+                 r.get("statcast_score"), r.get("need_factor"), r.get("risk_adjustment"),
+                 1 if r.get("is_mock") else 0)
+                for r in rows
+            ],
+        )
+        return len(rows)
+
+    def get_session(self, session_id: str) -> pd.DataFrame:
+        return pd.read_sql_query(
+            "SELECT * FROM fa_recommendations WHERE session_id = ? ORDER BY final_score DESC",
+            self.conn, params=(session_id,),
+        )
+
+    def latest_session_id(self) -> Optional[str]:
+        row = self.conn.execute(
+            "SELECT session_id FROM fa_recommendations ORDER BY created_at DESC, id DESC LIMIT 1"
+        ).fetchone()
+        return row[0] if row else None
+
+    def count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM fa_recommendations").fetchone()[0]

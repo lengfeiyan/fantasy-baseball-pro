@@ -142,6 +142,85 @@ CREATE TABLE IF NOT EXISTS injury_reports (
 )
 """
 
+# ===== 数据统一入库（DB 为唯一数据源，CSV 转为时间戳历史备份）=====
+
+# ADP 快照（每次抓取整体替换；TTL 看 fetched_at）
+ADP_SQL = """
+CREATE TABLE IF NOT EXISTS adp (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    team TEXT,
+    pos TEXT,
+    adp REAL,
+    source TEXT DEFAULT 'FantasyPros',
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+# 排名快照（按 method 整体替换，永远代表最新一次生成）
+RANKINGS_SQL = """
+CREATE TABLE IF NOT EXISTS rankings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    method TEXT NOT NULL,
+    season INTEGER,
+    rank INTEGER,
+    name TEXT,
+    team TEXT,
+    pos TEXT,
+    player_type TEXT,
+    vorp REAL,
+    vorp_upside REAL,
+    vorp_floor REAL,
+    sgp_total REAL,
+    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+# 选秀日志（会话式追加：一次模拟一个 session_id，支持多顺位对比）
+DRAFT_LOGS_SQL = """
+CREATE TABLE IF NOT EXISTS draft_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT,
+    method TEXT,
+    strategy TEXT,
+    user_pick INTEGER,
+    round INTEGER,
+    pick INTEGER,
+    team INTEGER,
+    name TEXT,
+    team_name TEXT,
+    pos TEXT,
+    vorp REAL,
+    sgp_total REAL,
+    adp REAL,
+    is_user_pick INTEGER,
+    is_value_pick INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+# FA 推荐记录（会话式追加）
+FA_RECOMMENDATIONS_SQL = """
+CREATE TABLE IF NOT EXISTS fa_recommendations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT,
+    method TEXT,
+    risk_preference TEXT,
+    player_id INTEGER,
+    name TEXT,
+    team TEXT,
+    pos TEXT,
+    final_score REAL,
+    overall_value REAL,
+    base_score REAL,
+    statcast_score REAL,
+    need_factor REAL,
+    risk_adjustment REAL,
+    is_mock INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
 INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_hitters_name ON hitters(name)",
     "CREATE INDEX IF NOT EXISTS idx_pitchers_name ON pitchers(name)",
@@ -154,6 +233,10 @@ INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_user_roster_name ON user_roster(name)",
     "CREATE INDEX IF NOT EXISTS idx_injury_reports_player ON injury_reports(player_id)",
     "CREATE INDEX IF NOT EXISTS idx_injury_reports_name ON injury_reports(name)",
+    "CREATE INDEX IF NOT EXISTS idx_adp_name ON adp(name)",
+    "CREATE INDEX IF NOT EXISTS idx_rankings_query ON rankings(method, season, rank)",
+    "CREATE INDEX IF NOT EXISTS idx_draft_logs_session ON draft_logs(session_id)",
+    "CREATE INDEX IF NOT EXISTS idx_fa_recs_session ON fa_recommendations(session_id)",
 ]
 
 ALL_TABLE_SQL = [
@@ -166,6 +249,10 @@ ALL_TABLE_SQL = [
     PLAYER_SEASON_STATS_SQL,
     USER_ROSTER_SQL,
     INJURY_REPORTS_SQL,
+    ADP_SQL,
+    RANKINGS_SQL,
+    DRAFT_LOGS_SQL,
+    FA_RECOMMENDATIONS_SQL,
 ]
 
 

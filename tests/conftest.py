@@ -44,6 +44,50 @@ def fresh_conn(tmp_db_path):
     conn.close()
 
 
+@pytest.fixture
+def isolated_db(fresh_conn, monkeypatch):
+    """把业务模块内的 ``db_session()`` 调用重定向到测试连接。
+
+    数据统一入库后，generate_rankings / simulate_and_save / export 等会在
+    内部走 db_session 写库；不加此 fixture 会污染真实 fantasy_baseball.db。
+    """
+    from contextlib import contextmanager
+
+    from fantasy_baseball import db as db_mod
+
+    @contextmanager
+    def fake_session(db_path=None):
+        yield fresh_conn
+
+    monkeypatch.setattr(db_mod, "db_session", fake_session)
+    return fresh_conn
+
+
+@pytest.fixture
+def isolated_history(tmpdir, monkeypatch):
+    """时间戳备份重定向到临时目录，避免测试污染真实 output/history/。
+
+    返回写入的备份路径列表（断言用）。
+    """
+    written = []
+
+    def fake_history(name):
+        base = os.path.basename(str(name))
+        path = str(tmpdir.join(f"hist_{base}"))
+        written.append(path)
+        return path
+
+    for mod in (
+        "fantasy_baseball.core.scoring",
+        "fantasy_baseball.core.sgp",
+        "fantasy_baseball.core.draft",
+        "fantasy_baseball.fa.recommendation",
+        "fantasy_baseball.config",
+    ):
+        monkeypatch.setattr(mod + ".history_path", fake_history, raising=False)
+    return written
+
+
 @pytest.fixture(autouse=True)
 def reset_config_cache():
     """每个测试后重置配置单例缓存，避免跨用例污染。"""

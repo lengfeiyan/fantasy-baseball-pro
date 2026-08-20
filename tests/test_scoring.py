@@ -55,7 +55,10 @@ def test_empty_db_raises(fresh_conn):
         sm.calculate_vorp()
 
 
-def test_generate_rankings(tmpdir, fresh_conn, sample_hitters, sample_pitchers, monkeypatch):
+def test_generate_rankings(
+    tmpdir, fresh_conn, isolated_db, isolated_history, monkeypatch,
+    sample_hitters, sample_pitchers,
+):
     _seed_merged(fresh_conn, sample_hitters, sample_pitchers)
     out = str(tmpdir.join("rankings.csv"))
     monkeypatch.setattr(

@@ -124,11 +124,12 @@ def _cmd_rank(args) -> int:
     if args.method == "sgp":
         from .core.sgp import SGPModel
         path = SGPModel().generate_rankings()
-        print(f"[完成] SGP 排名已生成：{path}")
+        print(f"[完成] SGP 排名已生成并写入数据库：{path}")
     else:
         from .core import ScoringModel
         path = ScoringModel().generate_rankings()
-        print(f"[完成] VORP 排名已生成：{path}")
+        print(f"[完成] VORP 排名已生成并写入数据库：{path}")
+    print("时间戳历史备份：output/history/")
     return 0
 
 
@@ -136,7 +137,7 @@ def _cmd_adp(args) -> int:
     from .core import ADPCache
 
     df = ADPCache().fetch_adp(force=args.force)
-    print(f"[完成] ADP 数据就绪（{len(df)} 条）：{ADPCache().adp_file}")
+    print(f"[完成] ADP 数据就绪（{len(df)} 条，已写入数据库）")
     return 0
 
 
@@ -146,7 +147,8 @@ def _cmd_draft(args) -> int:
     path = SnakeDraftSimulator(method=getattr(args, "method", "vorp")).simulate_and_save(
         user_pick=args.pick, strategy=args.strategy
     )
-    print(f"[完成] 选秀日志：{path}")
+    print(f"[完成] 选秀日志已写入数据库（会话保存）：{path}")
+    print("提示：roster import 可直接用该 CSV，或用 GUI「从最近模拟导入」读库")
     return 0
 
 

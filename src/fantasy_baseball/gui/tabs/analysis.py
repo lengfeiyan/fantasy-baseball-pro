@@ -64,7 +64,12 @@ def create_tab(parent: tk.Widget, app) -> None:
 
         app.run_async(
             _work,
-            on_done=lambda r: set_text(output, f"[完成] 排名已保存：\n{r}"),
+            on_done=lambda r: set_text(
+                output,
+                "[完成] 排名已写入数据库（当前状态）\n"
+                f"最近一份 CSV：{r}\n"
+                "时间戳历史备份：output/history/",
+            ),
             status="计算排名中...",
         )
 
@@ -72,14 +77,16 @@ def create_tab(parent: tk.Widget, app) -> None:
         def _work():
             app.post("【3/3】准备 ADP 数据…")
             cache = ADPCache()
-            cache.fetch_adp(force=True)
-            # adp_file 本身就是绝对路径（core/adp.py 内部已做 resolve_path）。
-            # 修复：此前此处误调 resolve_path，而该名未导入 → 每次点击必弹 NameError。
-            return cache.adp_file
+            df = cache.fetch_adp(force=True)
+            return len(df)
 
         app.run_async(
             _work,
-            on_done=lambda r: set_text(output, f"✅ ADP 已就绪：\n{r}"),
+            on_done=lambda n: set_text(
+                output,
+                f"✅ ADP 已就绪（{n} 条，已写入数据库）\n"
+                "缓存有效期 12 小时，过期自动重抓",
+            ),
             status="准备 ADP…",
         )
 
@@ -102,7 +109,12 @@ def create_tab(parent: tk.Widget, app) -> None:
 
         app.run_async(
             _work,
-            on_done=lambda r: set_text(output, f"[完成] 流水线完成！\n排名文件：{r}"),
+            on_done=lambda r: set_text(
+                output,
+                "[完成] 流水线完成！数据均已写入数据库。\n"
+                f"排名最近一份 CSV：{r}\n"
+                "时间戳历史备份：output/history/。可用上方「查看排名」直接读库。",
+            ),
             status="运行流水线...",
         )
 

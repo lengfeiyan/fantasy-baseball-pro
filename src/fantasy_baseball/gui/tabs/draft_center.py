@@ -75,7 +75,10 @@ def create_tab(parent: tk.Widget, app) -> None:
                     f"  第{int(r['round'])}轮: {r['name']} ({r['pos']}) "
                     f"{value_label}={r.get(value_key, 0):.1f}{mark}"
                 )
-            lines.append(f"\n日志已保存：{log_path}")
+            lines.append(f"\n日志已写入数据库（会话保存，支持多模拟对比）")
+            lines.append(f"最近一份 CSV：{log_path}")
+            lines.append("历史备份：output/history/（时间戳文件，永不覆盖）")
+            lines.append("提示：去「阵容验证」页点「从最近模拟导入」即可一键导入这套阵容。")
             return "\n".join(lines)
 
         app.run_async(_work, on_done=lambda r: set_text(output, r), status="模拟选秀...")

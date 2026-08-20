@@ -136,7 +136,12 @@ def create_tab(parent: tk.Widget, app) -> None:
 
         def _done(path):
             if path:
-                set_text(output, f"[完成] 已导出：{path}")
+                set_text(
+                    output,
+                    "[完成] 推荐已写入数据库（会话保存）\n"
+                    f"最近一份 CSV：{path}\n"
+                    "历史备份：output/history/（时间戳文件）",
+                )
             else:
                 set_text(output, "无可导出的推荐。")
 

@@ -25,7 +25,6 @@ from .tabs import (
     explore,
     fa_tab,
     home,
-    plugins_tab,
     roster,
     sleeper,
 )
@@ -38,6 +37,8 @@ class TaskCancelled(Exception):
     pass
 
 # 各 tab 模块的 create 函数映射（顺序即选项卡顺序）
+# 插件管理 tab 暂时屏蔽（用户要求）；模块与 plugins/ 包保留，恢复时
+# 重新 import plugins_tab 并加回 ("插件管理", plugins_tab.create_tab) 即可
 TAB_BUILDERS = [
     ("首页", home.create_tab),
     ("数据管理", data.create_tab),
@@ -48,7 +49,6 @@ TAB_BUILDERS = [
     ("Sleeper挖掘", sleeper.create_tab),
     ("FA分析", fa_tab.create_tab),
     ("数据探索", explore.create_tab),
-    ("插件管理", plugins_tab.create_tab),
 ]
 
 

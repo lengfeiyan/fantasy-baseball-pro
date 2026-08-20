@@ -34,16 +34,17 @@ def gui_app():
 # ============================================================
 class TestGUIConstruction:
     def test_tabs_created(self, gui_app):
-        """所有选项卡应成功创建。"""
-        assert gui_app.notebook.index("end") == 10
+        """所有选项卡应成功创建（插件管理暂时屏蔽，9 个）。"""
+        assert gui_app.notebook.index("end") == 9
 
     def test_tab_titles(self, gui_app):
         """选项卡标题应与预期一致。"""
-        titles = [gui_app.notebook.tab(i, "text") for i in range(10)]
+        titles = [gui_app.notebook.tab(i, "text") for i in range(9)]
         assert "首页" in titles
         assert "选秀中心" in titles
         assert "数据探索" in titles
         assert "FA分析" in titles
+        assert "插件管理" not in titles  # 已屏蔽
 
     def test_status_var_exists(self, gui_app):
         assert gui_app.status_var.get() == "就绪"

@@ -336,16 +336,14 @@ class ADPCache:
 
     @staticmethod
     def _age_seconds(ts: str) -> float:
-        """SQLite CURRENT_TIMESTAMP（UTC）距今的秒数；解析失败视为已过期。"""
-        import calendar
+        """时间戳距今的秒数（仓储写入的是本地时间，按本地时区解析）；
+        解析失败视为已过期。"""
         from datetime import datetime as _dt
 
         try:
-            epoch = calendar.timegm(
-                _dt.strptime(str(ts)[:19], "%Y-%m-%d %H:%M:%S").timetuple()
-            )
-            return time.time() - epoch
-        except (ValueError, TypeError):
+            st = _dt.strptime(str(ts)[:19], "%Y-%m-%d %H:%M:%S")
+            return time.time() - time.mktime(st.timetuple())
+        except (ValueError, TypeError, OverflowError):
             return float("inf")
 
     def _save_all(self, df: pd.DataFrame) -> None:

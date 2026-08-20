@@ -8,9 +8,20 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
 
 import pandas as pd
+
+
+def _local_now() -> str:
+    """本地时间的字符串形式（YYYY-MM-DD HH:MM:SS）。
+
+    修复审计反馈：SQLite 的 CURRENT_TIMESTAMP 默认写 UTC，与用户本地时间
+    差时区（中国 +8h），表里时间戳"不对"。所有业务写入显式传本地时间，
+    表定义里的 DEFAULT 仅作兜底。
+    """
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 class _BaseRepository:
@@ -264,11 +275,12 @@ class AdpRepository(_BaseRepository):
         self.conn.execute("DELETE FROM adp")
         if not rows:
             return 0
+        ts = _local_now()
         self.conn.executemany(
-            """INSERT INTO adp(name, team, pos, adp, source)
-               VALUES(?,?,?,?,COALESCE(?, 'FantasyPros'))""",
+            """INSERT INTO adp(name, team, pos, adp, source, fetched_at)
+               VALUES(?,?,?,?,COALESCE(?, 'FantasyPros'),?)""",
             [
-                (r.get("name"), r.get("team"), r.get("pos"), r.get("adp"), r.get("source"))
+                (r.get("name"), r.get("team"), r.get("pos"), r.get("adp"), r.get("source"), ts)
                 for r in rows
             ],
         )
@@ -296,14 +308,15 @@ class RankingsRepository(_BaseRepository):
         self.conn.execute("DELETE FROM rankings WHERE method = ?", (method,))
         if not rows:
             return 0
+        ts = _local_now()
         self.conn.executemany(
             """INSERT INTO rankings(method, season, rank, name, team, pos, player_type,
-                                   vorp, vorp_upside, vorp_floor, sgp_total)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                                   vorp, vorp_upside, vorp_floor, sgp_total, generated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
             [
                 (method, season, r.get("rank"), r.get("name"), r.get("team"),
                  r.get("pos"), r.get("player_type"), r.get("vorp"),
-                 r.get("vorp_upside"), r.get("vorp_floor"), r.get("sgp_total"))
+                 r.get("vorp_upside"), r.get("vorp_floor"), r.get("sgp_total"), ts)
                 for r in rows
             ],
         )
@@ -334,18 +347,21 @@ class DraftLogRepository(_BaseRepository):
         self.conn.execute("DELETE FROM draft_logs WHERE session_id = ?", (session_id,))
         if not rows:
             return 0
+        ts = _local_now()
         self.conn.executemany(
             """INSERT INTO draft_logs(session_id, method, strategy, user_pick,
                                       round, pick, team, name, team_name, pos,
-                                      vorp, sgp_total, adp, is_user_pick, is_value_pick)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                      vorp, sgp_total, adp, is_user_pick, is_value_pick,
+                                      created_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             [
                 (session_id, method, strategy, user_pick,
                  r.get("round"), r.get("pick"), r.get("team"), r.get("name"),
                  r.get("team_name"), r.get("pos"), r.get("vorp"), r.get("sgp_total"),
                  r.get("adp"),
                  1 if r.get("is_user_pick") else 0,
-                 1 if r.get("is_value_pick") else 0)
+                 1 if r.get("is_value_pick") else 0,
+                 ts)
                 for r in rows
             ],
         )
@@ -386,18 +402,21 @@ class RecommendationRepository(_BaseRepository):
         )
         if not rows:
             return 0
+        ts = _local_now()
         self.conn.executemany(
             """INSERT INTO fa_recommendations(session_id, method, risk_preference,
                                              player_id, name, team, pos,
                                              final_score, overall_value, base_score,
-                                             statcast_score, need_factor, risk_adjustment, is_mock)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                             statcast_score, need_factor, risk_adjustment, is_mock,
+                                             created_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             [
                 (session_id, method, risk_preference,
                  r.get("player_id"), r.get("name"), r.get("team"), r.get("pos"),
                  r.get("final_score"), r.get("overall_value"), r.get("base_score"),
                  r.get("statcast_score"), r.get("need_factor"), r.get("risk_adjustment"),
-                 1 if r.get("is_mock") else 0)
+                 1 if r.get("is_mock") else 0,
+                 ts)
                 for r in rows
             ],
         )

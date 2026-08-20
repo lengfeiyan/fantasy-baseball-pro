@@ -251,3 +251,48 @@ def test_adp_backfill_from_csv(fresh_conn, isolated_db, monkeypatch):
     monkeypatch.setattr(cache2, "_cache_valid", lambda: True)
     cache2.fetch_adp(allow_network=False)
     assert AdpRepository(fresh_conn).get_all().iloc[0]["name"] == "Kept"
+
+
+# ============================================================
+# 本地时间戳（回归：SQLite CURRENT_TIMESTAMP 曾写 UTC，差 8 小时）
+# ============================================================
+def test_timestamps_are_local(fresh_conn):
+    """仓储写入的时间戳应与本地时间一致（±60s 容差），不再是 UTC。"""
+    import time as _time
+    from datetime import datetime as _dt
+
+    from fantasy_baseball.db.repositories import _local_now
+
+    def _parse(ts: str) -> float:
+        return _time.mktime(_dt.strptime(ts, "%Y-%m-%d %H:%M:%S").timetuple())
+
+    now = _time.time()
+
+    AdpRepository(fresh_conn).replace_all([{"name": "A", "pos": "OF", "adp": 1.0}])
+    ts = AdpRepository(fresh_conn).latest_fetch_time()
+    assert abs(_parse(ts) - now) < 60, f"adp.fetched_at 偏离本地时间: {ts}"
+
+    RankingsRepository(fresh_conn).replace_method("vorp", 2026, [{"rank": 1, "name": "A"}])
+    ts = fresh_conn.execute(
+        "SELECT MAX(generated_at) FROM rankings"
+    ).fetchone()[0]
+    assert abs(_parse(ts) - now) < 60, f"rankings.generated_at 偏离本地时间: {ts}"
+
+    DraftLogRepository(fresh_conn).save_session("s", [{"round": 1, "name": "A"}])
+    RecommendationRepository(fresh_conn).save_session("r", [{"name": "A"}])
+    for table in ("draft_logs", "fa_recommendations"):
+        ts = fresh_conn.execute(f"SELECT MAX(created_at) FROM {table}").fetchone()[0]
+        assert abs(_parse(ts) - now) < 60, f"{table}.created_at 偏离本地时间: {ts}"
+
+
+def test_adp_age_parses_local_timestamp():
+    """TTL 年龄计算按本地时区解析（配合仓储写入的本地时间戳）。"""
+    from datetime import datetime as _dt
+
+    from fantasy_baseball.core.adp import ADPCache
+
+    now_str = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+    age = ADPCache._age_seconds(now_str)
+    assert 0 <= age < 60  # 刚写入 → 几乎为 0（若按 UTC 解析会差 8 小时）
+    assert ADPCache._age_seconds("2020-01-01 00:00:00") > 86400 * 365
+    assert ADPCache._age_seconds("garbage") == float("inf")

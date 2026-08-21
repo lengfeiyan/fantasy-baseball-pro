@@ -21,7 +21,7 @@ from typing import List, Optional
 
 import pandas as pd
 
-from ..config import get_config, resolve_path
+from ..config import get_config, history_path, output_path, resolve_path
 from ..utils.logger import get_logger
 
 logger = get_logger("adp")
@@ -269,6 +269,9 @@ class ADPCache:
         # 避免临时 CSV 与真实库互相污染
         self.use_db = use_db and adp_file is None
         self._df: Optional[pd.DataFrame] = None
+        # 本次数据的来源（供上层给出准确提示）：
+        # network / db / csv_legacy / csv_latest / mock
+        self.last_source = ""
 
     def fetch_adp(self, force: bool = False, allow_network: bool = True) -> pd.DataFrame:
         """获取 ADP 数据。
@@ -285,24 +288,43 @@ class ADPCache:
             df = self._load_from_db()
             if df is not None and not df.empty:
                 logger.info("从数据库加载 ADP（%d 条）", len(df))
+                self.last_source = "db"
                 self._df = df
                 return self._df
 
-        # 2. 本地 CSV 缓存（旧版回退，未过期）
+        # 2. 本地 CSV 回退（根目录旧版文件，未过期）
         if not force and self._cache_valid():
             try:
                 self._df = pd.read_csv(self.adp_file)
                 if not self._df.empty:
                     logger.info("从缓存加载 ADP: %s（%d 条）", self.adp_file, len(self._df))
+                    self.last_source = "csv_legacy"
                     self._backfill_db_from_csv(self._df)
                     return self._df
             except Exception as e:
                 logger.warning("读取 ADP 缓存失败: %s", e)
 
-        # 3. 在线抓取真实数据 → 写库 + 时间戳备份
+        # 2b. 「最近一份」CSV 回退（output/adp.csv，本管道写入）。
+        # 审计修复：此前 TTL 过期 + 断网时直接落到 25 条 mock，
+        # 磁盘上 12 小时前的真实数据备份全程不被考虑。
+        if not force and self.use_db:
+            latest = output_path("adp.csv")
+            if self._path_fresh(latest):
+                try:
+                    self._df = pd.read_csv(latest)
+                    if not self._df.empty:
+                        logger.info("从最近一份 CSV 加载 ADP: %s（%d 条）", latest, len(self._df))
+                        self.last_source = "csv_latest"
+                        self._backfill_db_from_csv(self._df)
+                        return self._df
+                except Exception as e:
+                    logger.warning("读取最近一份 ADP CSV 失败: %s", e)
+
+        # 3. 在线抓取真实数据 → 写库 + 双 CSV
         if allow_network:
             try:
                 self._df = fetch_real_adp()
+                self.last_source = "network"
                 self._save_all(self._df)
                 return self._df
             except Exception as e:
@@ -310,6 +332,7 @@ class ADPCache:
 
         # 4. mock 降级
         logger.info("使用内置 mock ADP 数据（%d 条）", len(_MOCK_ADP))
+        self.last_source = "mock"
         self._df = pd.DataFrame(_MOCK_ADP)
         # 修复 H3：mock 数据**永不写盘/落库**（只驻留内存）。
         # 避免首次离线运行写入 mock 后，恢复联网的 12 小时 TTL 内仍读到 mock，
@@ -347,7 +370,11 @@ class ADPCache:
             return float("inf")
 
     def _save_all(self, df: pd.DataFrame) -> None:
-        """抓取成功后的持久化：DB（当前状态）+ 时间戳备份（历史快照）。"""
+        """抓取成功后的持久化：DB（当前状态）+ 最近一份 CSV + 时间戳备份。
+
+        审计修复：此前漏写「最近一份」（output/adp.csv），断网 + TTL 过期
+        时 CSV 回退层只能读到旧版根目录文件，历史备份无读取端。
+        """
         if self.use_db:
             try:
                 from ..db import AdpRepository, db_session
@@ -359,11 +386,13 @@ class ADPCache:
             except Exception as e:
                 logger.warning("ADP 写入数据库失败: %s", e)
         try:
-            from ..config import history_path
-
-            path = history_path("adp.csv")
-            df.to_csv(path, index=False)
-            logger.info("ADP 历史备份: %s", path)
+            # 最近一份（同名覆盖，作为断网回退源）
+            latest = output_path("adp.csv")
+            df.to_csv(latest, index=False)
+            # 时间戳历史备份（永不覆盖）
+            backup = history_path("adp.csv")
+            df.to_csv(backup, index=False)
+            logger.info("ADP CSV 已保存：最近一份 %s；历史备份 %s", latest, backup)
         except OSError as e:
             logger.warning("写入 ADP 备份失败: %s", e)
 
@@ -386,11 +415,14 @@ class ADPCache:
         except Exception as e:
             logger.debug("ADP 回填数据库失败（忽略）: %s", e)
 
-    def _cache_valid(self) -> bool:
-        if not os.path.exists(self.adp_file):
+    def _path_fresh(self, path: str) -> bool:
+        """文件存在且 mtime 在 TTL 内。"""
+        if not os.path.exists(path):
             return False
-        age = time.time() - os.path.getmtime(self.adp_file)
-        return age < self.cache_ttl
+        return time.time() - os.path.getmtime(path) < self.cache_ttl
+
+    def _cache_valid(self) -> bool:
+        return self._path_fresh(self.adp_file)
 
     def get_player_adp(self, name: str, allow_network: bool = True) -> Optional[float]:
         """查询单个球员的 ADP，未找到返回 None。

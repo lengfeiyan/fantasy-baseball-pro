@@ -224,7 +224,8 @@ def test_adp_db_expired_falls_back_to_mock(fresh_conn, isolated_db, monkeypatch)
     fresh_conn.commit()
 
     cache = ADPCache()
-    monkeypatch.setattr(cache, "_cache_valid", lambda: False)
+    # _path_fresh 同时关掉根目录与 output/ 最近一份两层 CSV 回退
+    monkeypatch.setattr(cache, "_path_fresh", lambda path: False)
     df = cache.fetch_adp(allow_network=False)
     assert len(df) == len(adp_mod._MOCK_ADP)
     # mock 不落库（H3 语义扩展）
@@ -296,3 +297,36 @@ def test_adp_age_parses_local_timestamp():
     assert 0 <= age < 60  # 刚写入 → 几乎为 0（若按 UTC 解析会差 8 小时）
     assert ADPCache._age_seconds("2020-01-01 00:00:00") > 86400 * 365
     assert ADPCache._age_seconds("garbage") == float("inf")
+
+
+def test_adp_latest_csv_fallback(fresh_conn, isolated_db, tmpdir, monkeypatch):
+    """审计回归：DB 过期 + 根目录 CSV 失效 + output/adp.csv 有效 → 读最近一份。
+
+    旧实现漏了这层回退：TTL 过期 + 断网时磁盘上有真数据仍降级 25 条 mock。
+    """
+    from fantasy_baseball.core.adp import ADPCache
+    from fantasy_baseball.core import adp as adp_mod
+
+    AdpRepository(fresh_conn).replace_all([{"name": "OldRow", "pos": "OF", "adp": 1.0}])
+    fresh_conn.execute("UPDATE adp SET fetched_at = '2020-01-01 00:00:00'")
+    fresh_conn.commit()
+
+    # 根目录 CSV：失效；「最近一份」：有效且内容不同
+    monkeypatch.setattr(
+        adp_mod, "output_path", lambda p: str(tmpdir.join("latest_adp.csv"))
+    )
+    pd.DataFrame({"name": ["LatestRow"], "pos": ["SS"], "adp": [7.0]}).to_csv(
+        str(tmpdir.join("latest_adp.csv")), index=False
+    )
+    cache = ADPCache()
+    calls = {"root": False}
+    orig = cache._path_fresh
+    def fake_fresh(path):
+        if str(path) == cache.adp_file:
+            return False  # 根目录旧文件失效
+        return orig(path)
+    monkeypatch.setattr(cache, "_path_fresh", fake_fresh)
+
+    df = cache.fetch_adp(allow_network=False)
+    assert df.iloc[0]["name"] == "LatestRow"
+    assert cache.last_source == "csv_latest"

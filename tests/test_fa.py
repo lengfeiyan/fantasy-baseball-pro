@@ -273,3 +273,36 @@ def test_mock_stats_flagged(fresh_conn, tmpdir, monkeypatch):
     )
     stats = rtd.fetch_player_stats(99999)
     assert stats.get("is_mock") is True
+
+
+# ============================================================
+# 审计回归：xera 量级 + statcast 缺字段中性
+# ============================================================
+def test_statcast_pitcher_xera_real_scale(fresh_conn):
+    """xera 按 statcast.py 实际口径（xwOBA×5.5 ≈ 1.8-2.2）评分。
+
+    旧公式按官方 xERA 量级（基准 3.80）→ 联网投手恒 +45 撞满 100。
+    """
+    from fantasy_baseball.fa.analyzer import FAAnalyzer
+    a = FAAnalyzer(conn=fresh_conn)
+    elite = a._calculate_statcast_score({
+        "pos": "SP", "statcast": {"xera": 1.80}})   # 真实口径的精英
+    avg = a._calculate_statcast_score({
+        "pos": "SP", "statcast": {"xera": 2.05}})   # 典型
+    poor = a._calculate_statcast_score({
+        "pos": "SP", "statcast": {"xera": 2.30}})   # 真实口径的差生
+    assert elite > avg > poor
+    assert avg == pytest.approx(50.0, abs=1.0)   # 典型值 ≈ 基准 50
+    assert elite < 100 and poor > 0
+
+
+def test_statcast_missing_keys_neutral(fresh_conn):
+    """回归：statcast 部分字段缺失按中性跳过，不再当联盟最差值归零。"""
+    from fantasy_baseball.fa.analyzer import FAAnalyzer
+    a = FAAnalyzer(conn=fresh_conn)
+    # 只有 exit_velocity 一项，其余键全部缺失 → 应 ≈50（中性），而非 clip 到 0
+    score = a._calculate_statcast_score({
+        "pos": "OF", "statcast": {"exit_velocity": 88.0}})
+    assert score == pytest.approx(50.0, abs=1.0)
+    # 全缺 → 恰好 50
+    assert a._calculate_statcast_score({"pos": "OF", "statcast": {"x": 1}}) == pytest.approx(50.0)

@@ -175,3 +175,48 @@ def test_eligible_pos_multi_position_vorp(fresh_conn):
     assert by_name["DualGuy"] > by_name["Weak2B"]
     # 死代码修复的核心断言：eligible_pos 非空且含逗号时走多位置分支（不抛错、有值）
     assert not (df.loc[df["name"] == "DualGuy", "vorp"].isna().any())
+
+
+# ============================================================
+# 审计回归：UTIL 泄漏（上轮分位数修复激活）
+# ============================================================
+def test_util_eligibility_not_leaked(fresh_conn):
+    """eligible_pos 带 UTIL 的球员不得借 UTIL 的个位数替代水平虚抬 VORP。
+
+    实测泄漏：192/855 打者 eligible 含 UTIL，UTIL 池仅 3 人（替代分被
+    clip 到 ~8），多位置比较全部落到 UTIL → VORP 均值虚高 +34。
+    """
+    hitters = [
+        {"name": "Dual", "team": "TM", "pos": "OF", "eligible_pos": "OF,UTIL",
+         "R": 80, "HR": 20, "RBI": 75, "SB": 15, "AVG": 0.280, "PA": 600},
+        {"name": "Solo", "team": "TM", "pos": "OF",
+         "R": 80, "HR": 20, "RBI": 75, "SB": 15, "AVG": 0.280, "PA": 600},
+    ] + [
+        {"name": f"OF{i}", "team": "TM", "pos": "OF",
+         "R": 50 + i, "HR": 5, "RBI": 40, "SB": 3, "AVG": 0.240, "PA": 400}
+        for i in range(20)
+    ]
+    PlayerRepository(fresh_conn).replace_merged_hitters(hitters)
+
+    df = ScoringModel(conn=fresh_conn).calculate_vorp()
+    by_name = df.set_index("name")["vorp"]
+    # 同评分同位置：带 UTIL 资格与不带的双胞胎 VORP 必须一致
+    assert by_name["Dual"] == pytest.approx(by_name["Solo"], abs=0.01)
+
+
+def test_primary_util_uses_pool_replacement(fresh_conn):
+    """主位置为 UTIL 的球员用全体打者池分位数，不吃个位数替代水平。"""
+    hitters = [
+        {"name": "DH1", "team": "TM", "pos": "UTIL",
+         "R": 80, "HR": 25, "RBI": 80, "SB": 5, "AVG": 0.270, "PA": 550},
+    ] + [
+        {"name": f"OF{i}", "team": "TM", "pos": "OF",
+         "R": 50 + i, "HR": 5 + i, "RBI": 40, "SB": 3, "AVG": 0.240, "PA": 400}
+        for i in range(20)
+    ]
+    PlayerRepository(fresh_conn).replace_merged_hitters(hitters)
+    df = ScoringModel(conn=fresh_conn).calculate_vorp()
+    dh_vorp = df.set_index("name")["vorp"]["DH1"]
+    # 替代水平应来自全体池（分数量级几十+），而非个位数
+    score = df.set_index("name")["score"]["DH1"]
+    assert 0 < score - dh_vorp < score - 5  # 替代分明显大于 5

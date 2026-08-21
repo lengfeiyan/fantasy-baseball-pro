@@ -35,7 +35,9 @@ _MOCK_HITTER_STATCAST = {
 }
 _MOCK_PITCHER_STATCAST = {
     "velocity": 93.5, "spin_rate": 2300, "whiff_rate": 0.24,
-    "xera": 4.20, "hard_hit_allowed_rate": 0.38,
+    # xera 口径与真实聚合一致（面对打者 xwOBA×5.5 ≈ 1.8-2.2）；
+    # 此前 4.20 是官方 xERA 量级，与真实数据差一个尺度
+    "xera": 2.05, "hard_hit_allowed_rate": 0.38,
 }
 
 

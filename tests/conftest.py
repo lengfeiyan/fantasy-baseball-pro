@@ -77,14 +77,20 @@ def isolated_history(tmpdir, monkeypatch):
         written.append(path)
         return path
 
+    def fake_out(name):
+        base = os.path.basename(str(name))
+        return str(tmpdir.join(f"out_{base}"))
+
     for mod in (
         "fantasy_baseball.core.scoring",
         "fantasy_baseball.core.sgp",
         "fantasy_baseball.core.draft",
+        "fantasy_baseball.core.adp",
         "fantasy_baseball.fa.recommendation",
         "fantasy_baseball.config",
     ):
         monkeypatch.setattr(mod + ".history_path", fake_history, raising=False)
+        monkeypatch.setattr(mod + ".output_path", fake_out, raising=False)
     return written
 
 

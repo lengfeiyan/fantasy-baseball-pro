@@ -78,15 +78,23 @@ def create_tab(parent: tk.Widget, app) -> None:
             app.post("【3/3】准备 ADP 数据…")
             cache = ADPCache()
             df = cache.fetch_adp(force=True)
-            return len(df)
+            return len(df), cache.last_source
+
+        def _done(r):
+            n, source = r
+            if source == "mock":
+                src_text = "示例数据（网络不可用，未写入数据库）"
+            else:
+                src_text = "网络抓取，已写入数据库"
+            set_text(
+                output,
+                f"✅ ADP 已就绪（{n} 条，{src_text}）\n"
+                "缓存有效期 12 小时，过期自动重抓",
+            )
 
         app.run_async(
             _work,
-            on_done=lambda n: set_text(
-                output,
-                f"✅ ADP 已就绪（{n} 条，已写入数据库）\n"
-                "缓存有效期 12 小时，过期自动重抓",
-            ),
+            on_done=_done,
             status="准备 ADP…",
         )
 

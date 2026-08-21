@@ -136,8 +136,16 @@ def _cmd_rank(args) -> int:
 def _cmd_adp(args) -> int:
     from .core import ADPCache
 
-    df = ADPCache().fetch_adp(force=args.force)
-    print(f"[完成] ADP 数据就绪（{len(df)} 条，已写入数据库）")
+    cache = ADPCache()
+    df = cache.fetch_adp(force=args.force)
+    _src_text = {
+        "network": "网络抓取，已写入数据库",
+        "db": "数据库缓存",
+        "csv_legacy": "根目录 adp.csv 缓存",
+        "csv_latest": "最近一份 CSV 备份",
+        "mock": "示例数据（网络不可用，未写库）",
+    }
+    print(f"[完成] ADP 数据就绪（{len(df)} 条，来源：{_src_text.get(cache.last_source, cache.last_source)}）")
     return 0
 
 

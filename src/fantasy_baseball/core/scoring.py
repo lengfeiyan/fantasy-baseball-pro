@@ -123,6 +123,15 @@ class ScoringModel:
 
         replacement_levels = {}
         for pos in df["pos"].dropna().unique():
+            if pos == "UTIL":
+                # UTIL 无真实替代基准（专职 DH 池极小，直接分位数会被 clip
+                # 到个位数）：用全体打者池按打者总槽位的动态分位数
+                total_slots = sum(
+                    v for k, v in self.roster_slots.items() if k not in ("SP", "RP")
+                )
+                q_all = self._replacement_quantile(len(df), max(1, total_slots))
+                replacement_levels["UTIL"] = df["score"].quantile(q_all)
+                continue
             pos_scores = df.loc[df["pos"] == pos, "score"]
             if len(pos_scores) > 0:
                 pos_slots = self.roster_slots.get(pos, 1)
@@ -132,12 +141,18 @@ class ScoringModel:
         def _calc_vorp(row):
             score = row["score"]
             primary_pos = row.get("pos", "")
-            # 多位置资格：取所有合格位置中替代水平最低的（即 VORP 最高的位置）
+            # 多位置资格：取所有合格位置中替代水平最低的（即 VORP 最高的位置）。
+            # 审计回归修复：UTIL 不参与多位置比较——UTIL 不是真实替代基准
+            # （UTIL 池只有极少数专职 DH，替代水平被 clip 到 8 分左右），
+            # 192/855 打者的 eligible_pos 带 UTIL，一旦参与比较全部落到
+            # UTIL 拿到虚高 VORP（均值 +34，最高 +298）。
             eligible = row.get("eligible_pos", "")
             if eligible and isinstance(eligible, str) and "," in eligible:
                 best_vorp = None
                 for p in eligible.split(","):
                     p = p.strip()
+                    if p == "UTIL":
+                        continue
                     repl = replacement_levels.get(p, replacement_levels.get(primary_pos, 0))
                     v = score - repl
                     if best_vorp is None or v > best_vorp:

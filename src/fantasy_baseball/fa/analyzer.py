@@ -209,30 +209,40 @@ class FAAnalyzer:
         if not sc:
             return 0.0
         pos = player_stats.get("pos", "")
+
+        def _comp(val, baseline: float, weight: float) -> float:
+            """单组件贡献：(值 - 联盟典型值) × 权重；缺失键按中性 0 跳过。
+
+            审计回归修复：聚合器条件写键（Savant 缺列时键不存在），
+            旧实现 .get(key, 0) 把缺失当联盟最差值——缺 xwOBA 一项即
+            -124 分直接归零。
+            """
+            v = _safe_f(val)
+            if v is None:
+                return 0.0
+            return (v - baseline) * weight
+
         if pos in HITTER_POSITIONS:
-            # 修复审计项：旧公式各组件绝对值累加（xwOBA*300 一项就 60-135，
-            # 加上 EV/桶率/接触率后 250-380）→ min(100) 恒饱和，所有打者
-            # statcast_score 都是 100，25% 权重完全失效。
-            # 改为对联盟典型值的相对分：50 为基准，组件偏离线性加减，clip 0-100。
+            # 对联盟典型值的相对分：50 为基准，组件偏离线性加减，clip 0-100
             score = 50.0 + (
-                (sc.get("xwOBA", 0) - 0.310) * 400
-                + (sc.get("barrel_rate", 0) - 0.060) * 300
-                + (sc.get("exit_velocity", 0) - 88.0) * 3
-                + (sc.get("hard_hit_rate", 0) - 0.380) * 100
-                + (sc.get("swing_contact_rate", 0) - 0.800) * 50
+                _comp(sc.get("xwOBA"), 0.310, 400)
+                + _comp(sc.get("barrel_rate"), 0.060, 300)
+                + _comp(sc.get("exit_velocity"), 88.0, 3)
+                + _comp(sc.get("hard_hit_rate"), 0.380, 100)
+                + _comp(sc.get("swing_contact_rate"), 0.800, 50)
             )
         elif pos in PITCHER_POSITIONS:
-            # 修复 H9：statcast.py 存的键是小写 "xera"，此处原来读 "xERA"（大写）
-            # 恒取默认值 5，导致所有投手被无差别扣 (3-5)*20 = -40 分。
-            # 兼容两种大小写，避免其他数据源用大写。
-            # 同样改为相对分：50 为基准（投手旧公式同样恒饱和 100）。
-            xera = sc.get("xera", sc.get("xERA", 4.50))
+            # 兼容两种大小写键名（修复 H9）。
+            # xera 基准对齐 statcast.py 的实际口径——它算的是
+            # "面对打者 xwOBA × 5.5"（真实量级 1.8-2.2，典型 ~2.05），
+            # 不是官方 xERA（3.5-5.5）。审计回归修复：此前按 3.80 基准
+            # 导致联网投手恒 (3.80-2.0)×25=+45 撞满 100 上限。
             score = 50.0 + (
-                (3.80 - xera) * 25
-                + (sc.get("whiff_rate", 0) - 0.240) * 150
-                + (sc.get("velocity", 0) - 93.0) * 2
-                + (sc.get("spin_rate", 0) - 2300.0) * 0.004
-                + (0.360 - sc.get("hard_hit_allowed_rate", 0.360)) * 100
+                _comp(sc.get("xera", sc.get("xERA")), 2.05, -25)
+                + _comp(sc.get("whiff_rate"), 0.240, 150)
+                + _comp(sc.get("velocity"), 93.0, 2)
+                + _comp(sc.get("spin_rate"), 2300.0, 0.004)
+                + _comp(sc.get("hard_hit_allowed_rate"), 0.360, -100)
             )
         else:
             score = 0.0

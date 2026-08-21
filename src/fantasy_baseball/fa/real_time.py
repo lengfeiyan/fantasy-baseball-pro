@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from ..config import get_config, resolve_path
+from ..config import get_config, get_season, resolve_path
 from ..data_fetch.mlb_api import MLBStatsClient
 from ..data_fetch.statcast import StatcastFetcher
 from ..db import FaRepository, InjuryRepository, db_session
@@ -69,7 +69,8 @@ class RealTimeData:
         cfg = get_config().get("fa_analyzer", {}).get("cache", {})
         self.cache_dir = resolve_path(cache_dir or cfg.get("directory", "data/cache"))
         self.cache_expiry = cfg.get("expiry", 24) * 3600
-        self.season = season or _current_season()
+        # 审计修复：跟随 config data.season（手改赛季复盘上赛季时 FA 链路不再错抓当前年）
+        self.season = season if season is not None else get_season()
         os.makedirs(self.cache_dir, exist_ok=True)
         # 真实数据客户端
         self._mlb = MLBStatsClient(cache_dir=self.cache_dir)

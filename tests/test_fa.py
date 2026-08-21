@@ -234,12 +234,12 @@ def test_recommendation_risk_preference_changes_order(fresh_conn, monkeypatch):
             "base_score": 50, "statcast_score": 20, "is_mock": False,
         }
     monkeypatch.setattr(FAAnalyzer, "calculate_fa_value", fake_value)
-    # 重伤球员的 get_player_details 返回 severe
-    def fake_details(self, pid):
+    # 重伤球员的轻量伤病查询返回 severe（风险调整不再走全量评估）
+    def fake_injury(self, pid):
         if pid == 1:
-            return {"injury": {"severity": "severe"}, "overall_value": 100.0}
-        return {"injury": None, "overall_value": 100.0}
-    monkeypatch.setattr(FAAnalyzer, "get_player_details", fake_details)
+            return {"severity": "severe"}
+        return None
+    monkeypatch.setattr(FAAnalyzer, "get_active_injury", fake_injury)
     # 池：P1 重伤、P2 健康，但 need_factor 让 P1 略高
     monkeypatch.setattr(rec, "analyze_roster_needs", lambda *a, **k: {"OF": 1.0, "SP": 0.0})
     monkeypatch.setattr(
@@ -306,3 +306,23 @@ def test_statcast_missing_keys_neutral(fresh_conn):
     assert score == pytest.approx(50.0, abs=1.0)
     # 全缺 → 恰好 50
     assert a._calculate_statcast_score({"pos": "OF", "statcast": {"x": 1}}) == pytest.approx(50.0)
+
+
+def test_unified_injury_factors_no_double_punish(fresh_conn, monkeypatch):
+    """审计回归：单一系数表 + 半权重——long_term 综合惩罚不再是 ×0.045。"""
+    from fantasy_baseball.fa.analyzer import INJURY_FACTORS
+    from fantasy_baseball.fa.recommendation import RecommendationSystem
+
+    rec = RecommendationSystem(conn=fresh_conn)
+    monkeypatch.setattr(
+        type(rec.fa_analyzer), "get_active_injury",
+        lambda self, pid: {"severity": "long_term"},
+    )
+    balanced = rec._calculate_risk_adjustment(1, "balanced")
+    conservative = rec._calculate_risk_adjustment(1, "conservative")
+    aggressive = rec._calculate_risk_adjustment(1, "aggressive")
+    # 半权重：balanced = 1 - 0.7*0.5 = 0.65（旧幂缩放给 0.3^1.0=0.3）
+    assert balanced == pytest.approx(0.65, abs=0.01)
+    assert conservative < balanced < aggressive
+    # 与 analyzer 的价值折减叠加后：0.30 × 0.65 = 0.195（旧双重惩罚 0.15×0.3=0.045）
+    assert INJURY_FACTORS["long_term"] * balanced > 0.15

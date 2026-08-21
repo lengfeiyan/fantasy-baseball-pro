@@ -37,8 +37,8 @@ DEFAULTS: Dict[str, Any] = {
         "season": current_season(),
         "use_multi_source": False,
         "file_patterns": {
-            "hitters": f"hitters_{current_season()}_steamer.csv",
-            "pitchers": f"pitchers_{current_season()}_steamer.csv",
+            "hitters": "hitters_{season}_{source}.csv",
+            "pitchers": "pitchers_{season}_{source}.csv",
         },
         "positions_file": "data/player_positions_2025.csv",
     },
@@ -212,20 +212,39 @@ def output_path(filename: str) -> str:
 
 
 def history_path(filename: str) -> str:
-    """生成带时间戳的历史备份路径：output/history/<名>_<YYYYMMDD_HHMMSS>.csv。
+    """生成带时间戳的历史备份路径：output/history/<名>_<时间戳>.csv。
 
     数据统一入库后，CSV 从"最新数据"降级为"历史快照"：每次生成写一个
     时间戳文件，不再覆盖；DB 始终保存当前状态。
+
+    审计修复：时间戳含毫秒 + 已存在时追加序号——同秒两次生成不再
+    静默覆盖（与「永不覆盖」的承诺一致）。
     """
-    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S%f")[:-3]
     base = os.path.basename(filename)
-    if base.lower().endswith(".csv"):
-        stem = base[:-4]
-    else:
-        stem = base
+    stem = base[:-4] if base.lower().endswith(".csv") else base
     history_dir = os.path.join(PROJECT_ROOT, "output", "history")
     os.makedirs(history_dir, exist_ok=True)
-    return os.path.join(history_dir, f"{stem}_{stamp}.csv")
+    path = os.path.join(history_dir, f"{stem}_{stamp}.csv")
+    seq = 1
+    while os.path.exists(path):
+        path = os.path.join(history_dir, f"{stem}_{stamp}_{seq}.csv")
+        seq += 1
+    return path
+
+
+def write_csv_atomic(path: str, df) -> None:
+    """把 DataFrame 原子写入 CSV（temp + os.replace）。
+
+    审计修复：「最近一份」CSV 是固定路径、可能被并发任务同时写，
+    直接 to_csv 在 Windows 上会交错产生损坏文件；先写临时文件再
+    原子替换，读者只会看到完整的新版或旧版。
+    """
+    import uuid
+
+    tmp = f"{path}.tmp.{uuid.uuid4().hex[:8]}"
+    df.to_csv(tmp, index=False)
+    os.replace(tmp, path)
 
 
 def find_output_file(filename: str) -> str:

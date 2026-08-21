@@ -25,6 +25,15 @@ PITCHER_POSITIONS = {"SP", "RP", "P"}
 # 位置归一化映射（具体外野 → OF）
 _POSITION_NORMALIZE = {"LF": "OF", "CF": "OF", "RF": "OF", "DH": "UTIL"}
 
+# 伤病严重度 → 价值保留系数（单一事实来源）。
+# 审计修复：analyzer 与 recommendation 此前是两套不同的系数表，同一伤病
+# 在 overall_value 与 risk_adjustment 被双重惩罚（long_term 叠乘 ≈ ×0.045，
+# 好球员几乎从推荐消失）。现统一为一张表且整体放宽，recommendation 侧
+# 只按半权重再应用（表达风险偏好，不再重复全额惩罚）。
+INJURY_FACTORS = {
+    "mild": 0.90, "moderate": 0.75, "severe": 0.55, "long_term": 0.30,
+}
+
 
 def _normalize_pos(pos: str) -> str:
     """把 MLB 具体位置归一化为项目标准位置。"""
@@ -34,8 +43,9 @@ def _normalize_pos(pos: str) -> str:
 
 
 def _current_season() -> int:
-    """当前赛季年份。"""
-    return datetime.now().year
+    """生效赛季（跟随 config data.season，支持复盘上赛季）。"""
+    from ..config import get_season
+    return get_season()
 
 
 def _safe_f(v) -> Optional[float]:
@@ -69,9 +79,7 @@ class FAAnalyzer:
             "C": 1.3, "SS": 1.2, "2B": 1.1, "3B": 1.05,
             "1B": 0.9, "OF": 0.85, "SP": 1.0, "RP": 1.15,
         }
-        self.injury_factors = {
-            "mild": 0.85, "moderate": 0.65, "severe": 0.4, "long_term": 0.15,
-        }
+        self.injury_factors = dict(INJURY_FACTORS)
 
     # -------------------------------------------------------------- FA 池
     def get_fa_pool(self, position: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -278,6 +286,23 @@ class FAAnalyzer:
         injury = self._run(_do)
         value["injury"] = injury
         return value
+
+    def get_active_injury(self, player_id: int) -> Optional[Dict[str, Any]]:
+        """轻量查询未康复的现行伤病（不触发评分/网络）。
+
+        审计修复：推荐系统的风险调整此前调 get_player_details，内部会
+        把整套 calculate_fa_value（网络/Statcast/趋势）重跑一遍——
+        大池子双倍耗时。
+        """
+        def _do(conn):
+            row = conn.execute(
+                "SELECT severity, injury_type, start_date FROM injury_reports "
+                "WHERE player_id=? AND status != 'recovered' "
+                "ORDER BY start_date DESC LIMIT 1",
+                (player_id,),
+            ).fetchone()
+            return dict(row) if row else None
+        return self._run(_do)
 
     # -------------------------------------------------------------- 工具
     def _run(self, func):

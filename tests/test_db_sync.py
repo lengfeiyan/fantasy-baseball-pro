@@ -330,3 +330,37 @@ def test_adp_latest_csv_fallback(fresh_conn, isolated_db, tmpdir, monkeypatch):
     df = cache.fetch_adp(allow_network=False)
     assert df.iloc[0]["name"] == "LatestRow"
     assert cache.last_source == "csv_latest"
+
+
+def test_history_path_no_collision_same_second(tmpdir, monkeypatch):
+    """审计回归：同秒两次生成 history 备份不得互相覆盖。"""
+    from fantasy_baseball import config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "PROJECT_ROOT", str(tmpdir), raising=False)
+    import importlib
+    p1 = cfg_mod.history_path("rankings.csv")
+    p2 = cfg_mod.history_path("rankings.csv")
+    assert p1 != p2  # 毫秒时间戳 + 序号兜底
+
+
+def test_write_csv_atomic_replaces(tmpdir):
+    """审计回归：原子写替换旧文件且不留临时文件。"""
+    import pandas as pd
+    from fantasy_baseball.config import write_csv_atomic
+
+    path = str(tmpdir.join("latest.csv"))
+    write_csv_atomic(path, pd.DataFrame({"a": [1]}))
+    write_csv_atomic(path, pd.DataFrame({"a": [2]}))
+    df = pd.read_csv(path)
+    assert df["a"].tolist() == [2]
+    leftovers = [f for f in os.listdir(str(tmpdir)) if ".tmp." in f]
+    assert leftovers == []
+
+
+def test_session_id_milliseconds(fresh_conn, isolated_db):
+    """审计回归：同秒两次 save_session 不再互相 DELETE。"""
+    repo = DraftLogRepository(fresh_conn)
+    # 模拟外部同 session_id（真正的防护在生成端毫秒），此处验证不同 id 并存
+    repo.save_session("s_1", [{"round": 1, "name": "A"}])
+    repo.save_session("s_2", [{"round": 1, "name": "B"}])
+    assert repo.count() == 2

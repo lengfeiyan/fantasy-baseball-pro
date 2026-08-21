@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from ..config import get_config, history_path, output_path
+from ..config import get_config, history_path, output_path, write_csv_atomic
 from ..db import RosterRepository, db_session
 from ..utils.logger import get_logger
 from .analyzer import FAAnalyzer
@@ -151,26 +151,28 @@ class RecommendationSystem:
         }
 
     def _calculate_risk_adjustment(self, player_id: int, risk_preference: str) -> float:
-        """风险调整因子（含伤病与偏好）。
+        """风险调整因子（偏好调制伤病风险，半权重避免双重惩罚）。
 
-        修复审计项：偏好作为全局乘数不改变排序（保守=激进同序）。
-        改为幂缩放：conservative（指数 1.5）放大伤病惩罚、aggressive
-        （指数 0.5）衰减，balanced 即原始因子。幂缩放天然落在 (0, 1]，
-        不会被上限抵消（线性放大 (1-因子)×1.5 会被 min(1.0) 截断成无惩罚）。
+        审计修复：①此前调 get_player_details 把整套球员评估重跑一遍
+        （大池子双倍耗时），改用轻量 get_active_injury；②伤病系数与
+        analyzer 是两套表且全额叠乘（long_term 综合惩罚 ≈ ×0.045 过杀），
+        现统一 INJURY_FACTORS 并只按半权重再应用——base_score 已含
+        一次伤病价值折减，这里仅表达风险偏好：
+        conservative 放大、balanced 减半、aggressive 衰减。
         """
         risk_factor = 1.0
         try:
-            details = self.fa_analyzer.get_player_details(player_id)
-            injury = details.get("injury")
+            injury = self.fa_analyzer.get_active_injury(player_id)
             if injury:
-                severity = injury.get("severity", "mild")
-                factors = {"mild": 0.95, "moderate": 0.8, "severe": 0.6, "long_term": 0.3}
-                injury_factor = factors.get(severity, 0.95)
-                pref_exp = self.risk_preferences.get(risk_preference, 1.0)
-                risk_factor = injury_factor ** pref_exp
+                from .analyzer import INJURY_FACTORS
+
+                injury_factor = INJURY_FACTORS.get(injury.get("severity", "mild"), 0.90)
+                pref_mult = self.risk_preferences.get(risk_preference, 1.0)
+                penalty = (1.0 - injury_factor) * pref_mult * 0.5
+                risk_factor = max(0.05, 1.0 - penalty)
         except Exception as e:
-            logger.warning("获取球员 %d 详情失败: %s", player_id, e)
-        return min(risk_factor, 1.0)
+            logger.warning("获取球员 %d 伤病失败: %s", player_id, e)
+        return risk_factor
 
     # -------------------------------------------------------------- 导出
     def export_recommendations(
@@ -199,10 +201,10 @@ class RecommendationSystem:
             rows.append(row)
         df = pd.DataFrame(rows)
 
-        # 1. DB（会话式追加）
+        # 1. DB（会话式追加；含毫秒避免同秒两次导出互相 DELETE）
         import datetime as _dt
 
-        session_id = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_id = _dt.datetime.now().strftime("%Y%m%d_%H%M%S%f")[:-3]
         try:
             from ..db import RecommendationRepository, db_session
 
@@ -214,9 +216,9 @@ class RecommendationSystem:
         except Exception as e:
             logger.warning("FA 推荐写入数据库失败: %s", e)
 
-        # 2. CSV：最近一份 + 时间戳备份
+        # 2. CSV：最近一份（原子替换）+ 时间戳备份
         path = output_path(output_file)
-        df.to_csv(path, index=False)
+        write_csv_atomic(path, df)
         try:
             backup = history_path(output_file)
             df.to_csv(backup, index=False)

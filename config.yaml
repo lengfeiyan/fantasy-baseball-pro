@@ -7,10 +7,10 @@ data:
   season: 2026
   # 是否启用多源预测融合
   use_multi_source: true
-  # 数据文件命名模板
+  # 数据文件命名模板（支持 {source} 与 {season} 占位符；多源模式用）
   file_patterns:
-    hitters: "hitters_2026_{source}.csv"
-    pitchers: "pitchers_2026_{source}.csv"
+    hitters: "hitters_{season}_{source}.csv"
+    pitchers: "pitchers_{season}_{source}.csv"
   # 位置映射文件
   positions_file: "data/player_positions_2025.csv"
 

@@ -38,9 +38,19 @@ def create_tab(parent: tk.Widget, app) -> None:
         canvas.yview_scroll(int(-e.delta / 120), "units")
         return "break"  # 阻止其他控件（如下拉框）重复响应
 
-    # 鼠标在配置页内才接管滚轮，离开即还回（bind_all 是全局的）
-    canvas.bind("<Enter>", lambda e: parent.bind_all("<MouseWheel>", _on_wheel))
-    canvas.bind("<Leave>", lambda e: parent.unbind_all("<MouseWheel>"))
+    # 鼠标在配置页内才接管滚轮，离开即还回（bind_all 是全局的）。
+    # 审计修复：指针从画布空白移入内容区时 Tk 发 detail=NotifyInferior
+    # 的 Leave——不算真离开，忽略之，否则滚轮被误解绑（间歇性失效）。
+    def _bind_wheel(_e):
+        parent.bind_all("<MouseWheel>", _on_wheel)
+
+    def _unbind_wheel(e):
+        if getattr(e, "detail", "") == "NotifyInferior":
+            return
+        parent.unbind_all("<MouseWheel>")
+
+    canvas.bind("<Enter>", _bind_wheel)
+    canvas.bind("<Leave>", _unbind_wheel)
 
     # 三列布局：SGP 分母独占一列（10 行输入，与其他两列高度相近）
     col1 = ttk.Frame(inner)

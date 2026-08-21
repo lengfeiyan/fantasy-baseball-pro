@@ -21,7 +21,7 @@ from typing import List, Optional
 
 import pandas as pd
 
-from ..config import get_config, history_path, output_path, resolve_path
+from ..config import get_config, history_path, output_path, resolve_path, write_csv_atomic
 from ..utils.logger import get_logger
 
 logger = get_logger("adp")
@@ -386,9 +386,9 @@ class ADPCache:
             except Exception as e:
                 logger.warning("ADP 写入数据库失败: %s", e)
         try:
-            # 最近一份（同名覆盖，作为断网回退源）
+            # 最近一份（原子替换，作为断网回退源）
             latest = output_path("adp.csv")
-            df.to_csv(latest, index=False)
+            write_csv_atomic(latest, df)
             # 时间戳历史备份（永不覆盖）
             backup = history_path("adp.csv")
             df.to_csv(backup, index=False)

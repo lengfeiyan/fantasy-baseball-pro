@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from ..config import get_config, history_path, output_path
+from ..config import get_config, history_path, output_path, write_csv_atomic
 from ..utils.logger import get_logger
 from .adp import ADPCache
 from .scoring import ScoringModel
@@ -135,10 +135,10 @@ class SnakeDraftSimulator:
         if output_file is None:
             output_file = f"draft_log_pick{user_pick}_{strategy}.csv"
 
-        # 1. DB（会话式追加）
+        # 1. DB（会话式追加；含毫秒避免同秒两次模拟互相 DELETE）
         import datetime as _dt
 
-        session_id = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_id = _dt.datetime.now().strftime("%Y%m%d_%H%M%S%f")[:-3]
         try:
             from ..db import DraftLogRepository, db_session
 
@@ -151,9 +151,9 @@ class SnakeDraftSimulator:
         except Exception as e:
             logger.warning("选秀日志写入数据库失败: %s", e)
 
-        # 2. CSV：最近一份（同名覆盖）+ 时间戳历史备份
+        # 2. CSV：最近一份（原子替换）+ 时间戳历史备份
         path = output_path(output_file)
-        log_df.to_csv(path, index=False)
+        write_csv_atomic(path, log_df)
         try:
             backup = history_path(output_file)
             log_df.to_csv(backup, index=False)
@@ -234,34 +234,38 @@ class SnakeDraftSimulator:
 
         # 打者：看 HR/SB/R/RBI 是否偏科。
         # 修复审计项：R/RBI（~1000）与 SB（~80）原始值不可比，旧逻辑恒把
-        # R/RBI 当最强、SB/HR 当最弱。先按联盟典型团队总量归一化再比较。
+        # R/RBI 当最强、SB/HR 当最弱。强弱比较按联盟典型团队总量归一化；
+        # 审计回归修复：bonus 本体必须用原始值——归一化值 ×0.02 只有
+        # 0.003 量级（40HR → 0.0032），对 VORP（数百）/SGP（~10）的
+        # 排序毫无影响，功能实质死亡。
         if pos not in ("SP", "RP"):
-            cat_values = []
+            cat_values = []  # (stat, 归一化值, 原始值)
             for s in hitter_stats:
                 val = player.get(s)
                 if val is not None:
                     try:
+                        raw = float(val)
                         cat_values.append(
-                            (s, float(val) / _CAT_TYPICAL_TOTAL.get(s, 1.0))
+                            (s, raw / _CAT_TYPICAL_TOTAL.get(s, 1.0), raw)
                         )
                     except (ValueError, TypeError):
                         pass
             if cat_values and len(cat_values) >= 2:
-                # 找阵容最弱的类别（同样按归一化值比较）
+                # 找阵容最弱的类别（按归一化值比较）
                 weakest = min(
                     cat_totals.get(s, 0) / _CAT_TYPICAL_TOTAL.get(s, 1.0)
-                    for s, _ in cat_values
+                    for s, _n, _r in cat_values
                 )
                 strongest = max(
                     cat_totals.get(s, 0) / _CAT_TYPICAL_TOTAL.get(s, 1.0)
-                    for s, _ in cat_values
+                    for s, _n, _r in cat_values
                 )
                 if strongest > 0 and weakest < strongest * 0.5:
-                    # 阵容偏科：给在弱类上有贡献的球员 bonus
-                    for s, val in cat_values:
+                    # 阵容偏科：给在弱类上有贡献的球员 bonus（原始值 × 0.02）
+                    for s, _norm, raw in cat_values:
                         weakest_norm = cat_totals.get(s, 0) / _CAT_TYPICAL_TOTAL.get(s, 1.0)
-                        if weakest_norm == weakest and val > 0:
-                            bonus += val * 0.02  # 轻量 bonus
+                        if weakest_norm == weakest and raw > 0:
+                            bonus += raw * 0.02  # 40HR → +0.8，量级对 SGP 有效
 
         return min(bonus, 15.0)  # 上限 15 分，避免压过 VORP
 

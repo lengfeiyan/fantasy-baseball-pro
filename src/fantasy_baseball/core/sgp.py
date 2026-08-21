@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-from ..config import get_config, get_season, history_path, output_path
+from ..config import get_config, get_season, history_path, output_path, write_csv_atomic
 from ..db import PlayerRepository, db_session
 from ..utils.logger import get_logger
 
@@ -223,9 +223,9 @@ class SGPModel:
         except Exception as e:
             logger.warning("SGP 排名写入数据库失败: %s", e)
 
-        # 2. CSV：最近一份（同名覆盖）+ 时间戳历史备份
+        # 2. CSV：最近一份（原子替换）+ 时间戳历史备份
         path = output_path(output_file)
-        out.to_csv(path, index=False)
+        write_csv_atomic(path, out)
         try:
             backup = history_path(output_file)
             out.to_csv(backup, index=False)

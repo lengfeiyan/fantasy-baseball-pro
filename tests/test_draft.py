@@ -128,3 +128,16 @@ def test_monte_carlo_simulate_draft_sgp_pool():
     assert "sgp_total" in result.columns
     assert len(result) == 30
     assert result["times_drafted"].sum() <= 50 * 12 * 15
+
+
+def test_category_bonus_uses_raw_values():
+    """审计回归：类别平衡 bonus 用原始值——40HR 弱类补强应是 ~0.8 而非 0.003。"""
+    import pandas as pd
+    from fantasy_baseball.core.draft import SnakeDraftSimulator
+
+    sim = SnakeDraftSimulator(pd.DataFrame({"name": ["X"], "pos": ["OF"], "vorp": [10.0]}))
+    # 阵容：R 满额（1000），HR 几乎为 0（5）→ HR 是归一化后最弱类
+    totals = {"HR": 5.0, "R": 1000.0, "RBI": 900.0, "SB": 100.0}
+    player = pd.Series({"pos": "OF", "HR": 40, "R": 80, "RBI": 90, "SB": 10})
+    bonus = sim._category_balance_bonus(player, totals, ("HR", "SB", "R", "RBI"), ())
+    assert bonus == pytest.approx(40 * 0.02, abs=0.01)  # ≈0.8（归一化算法给 0.0032）

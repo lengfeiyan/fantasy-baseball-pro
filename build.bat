@@ -1,39 +1,38 @@
 @echo off
-chcp 65001 >nul
 echo ============================================
-echo   Fantasy Baseball Pro æ‰“åŒ…è„šæœ¬
+echo   Fantasy Baseball Pro ´ò°ü½Å±¾
 echo ============================================
 echo.
 
-echo [1/4] æ£€æŸ¥ PyInstaller...
+echo [1/4] ¼ì²é PyInstaller...
 pip show pyinstaller >nul 2>&1
 if errorlevel 1 (
-    echo       æœªå®‰è£…ï¼Œæ­£åœ¨å®‰è£…...
+    echo       Î´°²×°£¬ÕıÔÚ°²×°...
     pip install pyinstaller
 )
 
-echo [2/4] è®¾ç½®ç¯å¢ƒå˜é‡...
+echo [2/4] ÉèÖÃ»·¾³±äÁ¿...
 set PYTHONPATH=src
 
-echo [3/4] å¼€å§‹æ‰“åŒ…ï¼ˆå¯èƒ½éœ€è¦å‡ åˆ†é’Ÿï¼‰...
+echo [3/4] ¿ªÊ¼´ò°ü£¨¿ÉÄÜĞèÒª¼¸·ÖÖÓ£©...
 pyinstaller fbtool.spec --clean --noconfirm
 
 if errorlevel 1 (
     echo.
-    echo [é”™è¯¯] æ‰“åŒ…å¤±è´¥ï¼è¯·æ£€æŸ¥ä¸Šæ–¹é”™è¯¯ä¿¡æ¯ã€‚
+    echo [´íÎó] ´ò°üÊ§°Ü£¡Çë¼ì²éÉÏ·½´íÎóĞÅÏ¢¡£
     pause
     exit /b 1
 )
 
-echo [4/4] æ‰“åŒ…å®Œæˆï¼
+echo [4/4] ´ò°üÍê³É£¡
 echo.
-echo   è¾“å‡ºç›®å½•: dist\FantasyBaseballPro\
-echo   å¯åŠ¨ç¨‹åº: dist\FantasyBaseballPro\FantasyBaseballPro.exe
+echo   Êä³öÄ¿Â¼: dist\FantasyBaseballPro\
+echo   Æô¶¯³ÌĞò: dist\FantasyBaseballPro\FantasyBaseballPro.exe
 echo.
-echo   æ³¨æ„: è¿è¡Œæ—¶éœ€è¦ä»¥ä¸‹æ–‡ä»¶åœ¨ exe æ—è¾¹:
-echo     - config.yamlï¼ˆå·²è‡ªåŠ¨æ‰“åŒ…ï¼‰
-echo     - data\ ç›®å½•ï¼ˆå·²è‡ªåŠ¨æ‰“åŒ…ï¼‰
-echo     - USER_GUIDE.md ä½¿ç”¨è¯´æ˜ï¼ˆå·²è‡ªåŠ¨æ‰“åŒ…ï¼‰
-echo   é¦–æ¬¡è¿è¡Œä¼šè‡ªåŠ¨åˆ›å»º fantasy_baseball.db å’Œ logs\ã€output\
+echo   ×¢Òâ: ÔËĞĞÊ±ĞèÒªÒÔÏÂÎÄ¼şÔÚ exe ÅÔ±ß:
+echo     - config.yaml£¨ÒÑ×Ô¶¯´ò°ü£©
+echo     - data\ Ä¿Â¼£¨ÒÑ×Ô¶¯´ò°ü£©
+echo     - USER_GUIDE.md Ê¹ÓÃËµÃ÷£¨ÒÑ×Ô¶¯´ò°ü£©
+echo   Ê×´ÎÔËĞĞ»á×Ô¶¯´´½¨ fantasy_baseball.db ºÍ logs\¡¢output\
 echo.
 pause

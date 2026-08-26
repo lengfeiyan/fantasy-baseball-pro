@@ -30,6 +30,31 @@ DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 _configured: Dict[str, logging.Logger] = {}
 
 
+def _cleanup_old_logs(keep_days: int = 30, log_dir: str = None) -> None:
+    """删除超过保留期的按日日志文件（logs/ 无限增长治理）。
+
+    RotatingFileHandler 只在同名文件内轮转，而日志按日命名——
+    旧日期的文件永不参与轮转，需按 mtime 清理。
+    """
+    import time
+
+    directory = log_dir or LOG_DIR
+    cutoff = time.time() - keep_days * 86400
+    try:
+        for name in os.listdir(directory):
+            # 覆盖 *.log 与轮转副本 *.log.1 ~ *.log.5
+            if ".log" not in name:
+                continue
+            path = os.path.join(directory, name)
+            try:
+                if os.path.getmtime(path) < cutoff:
+                    os.remove(path)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
 def get_logger(name: str = "fantasy_baseball") -> logging.Logger:
     """获取配置好的 logger。
 
@@ -45,6 +70,9 @@ def get_logger(name: str = "fantasy_baseball") -> logging.Logger:
     except OSError:
         # 日志目录不可用时退化为仅控制台输出
         pass
+
+    # 清理 30 天前的按日日志（每次进程启动至多一次）
+    _cleanup_old_logs(keep_days=30)
 
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)

@@ -146,7 +146,7 @@ python -m fantasy_baseball gui
 python -m fantasy_baseball gui
 ```
 
-界面包含 **10 个选项卡**，以下逐个说明。
+界面包含 **9 个选项卡**，以下逐个说明。
 
 ### 4.1 首页
 
@@ -271,9 +271,10 @@ player_id,name,team,pos,status
 **伤病报告**：
 - 点击「查看伤病」显示数据库中的伤病列表
 
-### 4.10 插件管理
+### 4.10 插件管理（暂时屏蔽）
 
-加载和管理插件。插件放在项目根的 `plugins/` 目录（每个插件一个子目录，含 `__init__.py`）。
+插件系统与 `plugins/` 目录（每个插件一个子目录，含 `__init__.py`）仍然保留，
+界面入口暂时屏蔽；需要时在 `gui/app.py` 的 TAB_BUILDERS 加回一行即可。
 
 ---
 
@@ -852,7 +853,7 @@ fbtool/
 │   ├── plugins/                   # 插件系统
 │   ├── gui/                       # 图形界面
 │   │   ├── app.py                 #   主窗口 + run_async
-│   │   └── tabs/                  #   10 个选项卡
+│   │   └── tabs/                  #   9 个选项卡
 │   └── utils/                     # 日志
 ├── tests/                         # 单元测试（121 个）
 ├── config.yaml                    # 配置文件

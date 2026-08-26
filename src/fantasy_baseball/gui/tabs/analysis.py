@@ -159,6 +159,9 @@ def create_tab(parent: tk.Widget, app) -> None:
             df = pd.read_csv(rank_path)
             if "rank" not in df.columns:
                 df = df.rename(columns={rank_col_csv: "rank"})
+            if "rank" not in df.columns:
+                set_text(output, f"排名 CSV 缺少 rank/sgp_rank 列：{rank_file}\n请重新点「生成排名」。")
+                return
             source = "CSV"
 
         top = df.head(30)

@@ -153,7 +153,12 @@ class SnakeDraftSimulator:
 
         # 2. CSV：最近一份（原子替换）+ 时间戳历史备份
         path = output_path(output_file)
-        write_csv_atomic(path, log_df)
+        try:
+            write_csv_atomic(path, log_df)
+        except OSError as e:
+            # 最近一份写失败不应中断——历史备份仍要尝试（审计低危项：
+            # 此前此处未捕获，异常直接抛出导致备份代码不执行）
+            logger.warning("写入选秀日志最近一份 CSV 失败: %s", e)
         try:
             backup = history_path(output_file)
             log_df.to_csv(backup, index=False)

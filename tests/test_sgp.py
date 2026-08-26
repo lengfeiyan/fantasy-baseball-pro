@@ -206,3 +206,15 @@ class TestMissingStatBackDerivation:
         assert sparse["sgp_AVG"] == pytest.approx(full["sgp_AVG"], abs=0.1)
         # PA/AVG 全缺 → NaN 中性，而不是 0/0 产生的同一个常数
         assert pd.isna(bare["sgp_AVG"])
+
+
+def test_sgp_missing_columns_no_crash(fresh_conn):
+    """审计低危回归：列整体缺失（如只有 R/HR）不再 df.get 标量 AttributeError。"""
+    repo = PlayerRepository(fresh_conn)
+    repo.replace_merged_hitters([{"name": "OnlyR", "pos": "OF", "R": 80, "HR": 20}])
+    df = SGPModel(conn=fresh_conn).calculate_sgp()
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["sgp_R"] == pytest.approx(80 / (24.6 * 12 / 12), abs=0.01)
+    # 其余类别中性（缺失列为 0/NaN，不崩溃）
+    assert row["sgp_SB"] == 0 or row["sgp_SB"] != row["sgp_SB"]  # 0 或 NaN

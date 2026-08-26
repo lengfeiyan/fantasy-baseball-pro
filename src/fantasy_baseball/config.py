@@ -311,7 +311,7 @@ def save_config_values(updates: Dict[str, Any]) -> List[str]:
     Returns:
         未在文件中找到对应行的路径列表（调用方可据此提示用户），全部命中时为空。
     """
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
         lines = f.readlines()
 
     line_paths = _index_config_line_paths(lines)
@@ -326,10 +326,15 @@ def save_config_values(updates: Dict[str, Any]) -> List[str]:
         stripped = line.lstrip()
         indent = line[: len(line) - len(stripped)]
         final_key = path.split(".")[-1]
-        # 保留行尾注释。YAML 约定 # 前须有空格才构成注释，按 " #" 切分
-        # 可避免误切 URL 等值内的 #。
+        # 保留行尾注释。YAML 约定 # 前须有空格才构成注释；且要求切分点
+        # 之前引号成对（引号内的 " #" 属于值本身，不是注释——审计低危项）。
         comment = ""
-        pos = line.find(" #")
+        pos = -1
+        for i in range(len(line) - 1):
+            if line[i] == " " and line[i + 1] == "#":
+                if line[:i].count('"') % 2 == 0:
+                    pos = i
+                    break
         if pos >= 0:
             comment = "  " + line[pos:].rstrip()
 

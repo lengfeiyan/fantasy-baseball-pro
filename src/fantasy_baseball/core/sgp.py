@@ -45,6 +45,14 @@ _TEAM_WHIP_BASE = 1466.0
 _TEAM_WHIP = 1.23
 
 
+
+def _num_col(df: pd.DataFrame, name: str) -> pd.Series:
+    """取数值列；列缺失时返回全 NaN 的 Series（而非 df.get 的标量 nan，
+    后者链式 .fillna 会 AttributeError——审计低危项）。"""
+    if name in df.columns:
+        return pd.to_numeric(df[name], errors="coerce")
+    return pd.Series(float("nan"), index=df.index)
+
 class SGPModel:
     """Standings Gain Points 评分模型。
 
@@ -123,18 +131,18 @@ class SGPModel:
         d = self.hitter_denoms
 
         # 计数统计：直接除分母
-        df["sgp_R"] = pd.to_numeric(df.get("R"), errors="coerce").fillna(0) / d["R"]
-        df["sgp_HR"] = pd.to_numeric(df.get("HR"), errors="coerce").fillna(0) / d["HR"]
-        df["sgp_RBI"] = pd.to_numeric(df.get("RBI"), errors="coerce").fillna(0) / d["RBI"]
-        df["sgp_SB"] = pd.to_numeric(df.get("SB"), errors="coerce").fillna(0) / d["SB"]
+        df["sgp_R"] = _num_col(df, "R").fillna(0) / d["R"]
+        df["sgp_HR"] = _num_col(df, "HR").fillna(0) / d["HR"]
+        df["sgp_RBI"] = _num_col(df, "RBI").fillna(0) / d["RBI"]
+        df["sgp_SB"] = _num_col(df, "SB").fillna(0) / d["SB"]
 
         # 比率统计 AVG：球员对团队均值的拉动。
         # 修复审计高危项：AB/H 缺失时不再 fillna(0)（0/0 会给所有缺数据的
         # 打者同一个假 AVG 贡献，类别零信号）；先反推，仍缺则记 NaN（中性）。
-        ab = pd.to_numeric(df.get("AB"), errors="coerce")
-        h = pd.to_numeric(df.get("H"), errors="coerce")
-        pa = pd.to_numeric(df.get("PA"), errors="coerce")
-        avg = pd.to_numeric(df.get("AVG"), errors="coerce")
+        ab = _num_col(df, "AB")
+        h = _num_col(df, "H")
+        pa = _num_col(df, "PA")
+        avg = _num_col(df, "AVG")
         # AB 缺失但有 PA → 用联盟平均非击球率 ~12% 估算（AB ≈ 0.88×PA）
         ab = ab.mask(ab.isna() & pa.notna(), pa * 0.88)
         # H 缺失但有 AVG 和 AB → 按定义反推 H = AVG × AB（精确）
@@ -155,28 +163,28 @@ class SGPModel:
         """计算投手 5 类 SGP（W/SV/K/ERA/WHIP）。"""
         d = self.pitcher_denoms
 
-        df["sgp_W"] = pd.to_numeric(df.get("W"), errors="coerce").fillna(0) / d["W"]
-        df["sgp_SV"] = pd.to_numeric(df.get("SV"), errors="coerce").fillna(0) / d["SV"]
+        df["sgp_W"] = _num_col(df, "W").fillna(0) / d["W"]
+        df["sgp_SV"] = _num_col(df, "SV").fillna(0) / d["SV"]
 
         # 修复审计高危项：缺失的计数统计按定义从比率统计反推（精确换算），
         # 反推不出的记 NaN（中性），不再 fillna(0) 当真实零产量——
         # 旧实现 ER=0 曾让 team_ERA 退化为 4275/(IP+1192)，只随 IP 单调变化，
         # 局数越多 ERA 分越高，与真实 ERA 质量负相关；WHIP/K 同理。
-        ip = pd.to_numeric(df.get("IP"), errors="coerce")
-        era = pd.to_numeric(df.get("ERA"), errors="coerce")
-        whip = pd.to_numeric(df.get("WHIP"), errors="coerce")
-        k_per9 = pd.to_numeric(df.get("K_per_9"), errors="coerce")
+        ip = _num_col(df, "IP")
+        era = _num_col(df, "ERA")
+        whip = _num_col(df, "WHIP")
+        k_per9 = _num_col(df, "K_per_9")
         has_ip = ip.notna() & (ip > 0)
 
-        k = pd.to_numeric(df.get("K"), errors="coerce")
+        k = _num_col(df, "K")
         k = k.mask(k.isna() & k_per9.notna() & has_ip, k_per9 * ip / 9)
         df["sgp_K"] = k.fillna(0) / d["K"]  # 计数统计：反推后仍缺 → 0（中性）
 
-        er = pd.to_numeric(df.get("ER"), errors="coerce")
+        er = _num_col(df, "ER")
         er = er.mask(er.isna() & era.notna() & has_ip, era * ip / 9)
 
-        h_allow = pd.to_numeric(df.get("H_allow"), errors="coerce")
-        bb_allow = pd.to_numeric(df.get("BB_allow"), errors="coerce")
+        h_allow = _num_col(df, "H_allow")
+        bb_allow = _num_col(df, "BB_allow")
         allow = h_allow + bb_allow  # 任一缺失则为 NaN
         allow = allow.mask(allow.isna() & whip.notna() & has_ip, whip * ip)
 
@@ -225,7 +233,12 @@ class SGPModel:
 
         # 2. CSV：最近一份（原子替换）+ 时间戳历史备份
         path = output_path(output_file)
-        write_csv_atomic(path, out)
+        try:
+            write_csv_atomic(path, out)
+        except OSError as e:
+            # 最近一份写失败不应中断——历史备份仍要尝试（审计低危项：
+            # 此前此处未捕获，异常直接抛出导致备份代码不执行）
+            logger.warning("写入 SGP 排名最近一份 CSV 失败: %s", e)
         try:
             backup = history_path(output_file)
             out.to_csv(backup, index=False)

@@ -49,7 +49,7 @@ fbtool/
 │   ├── plugins/                   # 插件系统
 │   ├── gui/                       # 图形界面
 │   │   ├── app.py                 #   主窗口 + run_async
-│   │   └── tabs/                  #   10 个选项卡，直接 import
+│   │   └── tabs/                  #   9 个选项卡，直接 import
 │   └── utils/                     # 日志等
 ├── tests/                         # 单元测试（138 个）
 ├── config.yaml                    # 配置文件（核心）
@@ -100,8 +100,8 @@ python -m fantasy_baseball          # 启动图形界面
 fantasy-baseball gui                # 安装后可用
 ```
 
-10 个选项卡：首页 / 数据管理 / 配置设置 / 分析流水线 / 选秀中心 / 阵容验证 /
-Sleeper 挖掘 / FA 分析 / 数据探索 / 插件管理。
+9 个选项卡：首页 / 数据管理 / 配置设置 / 分析流水线 / 选秀中心 / 阵容验证 /
+Sleeper 挖掘 / FA 分析 / 数据探索。（插件系统保留，界面入口暂时屏蔽）
 
 排名 CSV、选秀日志、FA 导出统一输出到 `output/` 目录。
 

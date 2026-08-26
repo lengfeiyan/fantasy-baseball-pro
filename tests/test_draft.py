@@ -141,3 +141,35 @@ def test_category_bonus_uses_raw_values():
     player = pd.Series({"pos": "OF", "HR": 40, "R": 80, "RBI": 90, "SB": 10})
     bonus = sim._category_balance_bonus(player, totals, ("HR", "SB", "R", "RBI"), ())
     assert bonus == pytest.approx(40 * 0.02, abs=0.01)  # ≈0.8（归一化算法给 0.0032）
+
+
+def test_simulate_drafts_method_passthrough():
+    """审计低危回归：便捷函数透传 method，SGP 池不再 KeyError 'vorp'。"""
+    import numpy as np
+    import pandas as pd
+    from fantasy_baseball.core.monte_carlo import simulate_drafts
+
+    pool = pd.DataFrame({
+        "name": [f"P{i:02d}" for i in range(30)],
+        "pos": ["OF"] * 30,
+        "sgp_total": np.linspace(10.0, 0.1, 30),
+    })
+    result = simulate_drafts(iterations=20, player_pool=pool, method="sgp")
+    assert "sgp_total" in result.columns
+
+
+def test_monte_carlo_mixed_pool_no_mislabel():
+    """审计低危回归：池同时有 vorp 与 sgp_total 时，sgp 模式输出真 sgp_total。"""
+    import pandas as pd
+    from fantasy_baseball.core.monte_carlo import DraftEngine
+
+    pool = pd.DataFrame({
+        "name": [f"P{i:02d}" for i in range(30)],
+        "pos": ["OF"] * 30,
+        "vorp": [float(30 - i) for i in range(30)],        # 顺序与 sgp 相反
+        "sgp_total": [float(i + 1) for i in range(30)],
+    })
+    result = DraftEngine(pool, method="sgp").simulate_draft(iterations=10)
+    row = result[result["name"] == "P29"].iloc[0]
+    # P29 的 sgp_total=30（vorp=1）：若错标 vorp 会得到 1
+    assert row["sgp_total"] == pytest.approx(30.0)

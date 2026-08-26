@@ -306,8 +306,10 @@ class DraftEngine:
         # vorp = sgp_total（结果输出时按 method 还原列名）。
         if self.method == "sgp" and "vorp" not in df.columns and "sgp_total" in df.columns:
             df["vorp"] = df["sgp_total"]
-        # 缺 adp 列或全是默认值 999 → 用排名反推估算 ADP
-        if "adp" not in df.columns or df["adp"].fillna(999).max() == 999:
+        # 缺 adp 列或全部为默认值 999 → 用排名反推估算 ADP。
+        # 审计低危修复：旧判断 max==999 只要混入一个默认值就把全部真实
+        # ADP 整列丢弃换模型名次
+        if "adp" not in df.columns or df["adp"].fillna(999).eq(999).all():
             value_rank = df[rank_col].fillna(0).rank(method="first", ascending=False)
             df["adp"] = value_rank.astype(float)
         return df
@@ -336,14 +338,16 @@ class DraftEngine:
         logger.info("蒙特卡洛模拟：%d 次（%s 加速）", iterations,
                      "numba" if _HAS_NUMBA else "纯 Python")
 
-        # 准备球员数组
+        # 准备球员数组（SGP 模式优先用 sgp_total 作为数值通道）
         df = self.players.copy()
         n_players = len(df)
-        vorp_arr = df["vorp"].fillna(0).values.astype(np.float64)
+        _value_col = (
+            "sgp_total" if (self.method == "sgp" and "sgp_total" in df.columns) else "vorp"
+        )
+        vorp_arr = df[_value_col].fillna(0).values.astype(np.float64)
         adp_arr = df["adp"].fillna(999).values.astype(np.float64)
         # 按 ADP 排序的索引（模拟按 ADP 选人 + 随机噪声）
         sorted_idx = np.argsort(adp_arr)
-        vorp_sorted = vorp_arr[sorted_idx]
         adp_sorted = adp_arr[sorted_idx]
 
         total_picks = self.league_size * self.rounds
@@ -366,10 +370,13 @@ class DraftEngine:
             counts_orig[orig_idx] = draft_counts[i]
             picksums_orig[orig_idx] = pick_sums[i]
 
-        result = df[["name", "pos", "vorp", "adp"]].copy()
-        # SGP 模式的价值列还原为 sgp_total（与 analyze_availability 一致）
-        if self.method == "sgp" and "sgp_total" in df.columns:
-            result = result.rename(columns={"vorp": "sgp_total"})
+        # 输出价值列按 method 命名（池同时有 vorp 和 sgp_total 时不再把
+        # vorp 错标成 sgp_total——审计低危项）
+        if self.method == "sgp":
+            result = df[["name", "pos", _value_col, "adp"]].copy()
+            result = result.rename(columns={_value_col: "sgp_total"})
+        else:
+            result = df[["name", "pos", "vorp", "adp"]].copy()
         result["times_drafted"] = counts_orig
         result["draft_rate"] = counts_orig / iterations if iterations > 0 else 0
         result["avg_pick"] = np.where(
@@ -419,8 +426,9 @@ class DraftEngine:
 
 
 def simulate_drafts(
-    iterations: int = 1000, player_pool: Optional[pd.DataFrame] = None
+    iterations: int = 1000, player_pool: Optional[pd.DataFrame] = None,
+    method: str = "vorp",
 ) -> pd.DataFrame:
-    """便捷函数：运行蒙特卡洛模拟。"""
-    engine = DraftEngine(player_pool)
+    """便捷函数：运行蒙特卡洛模拟（method 需与池匹配，SGP 池传 "sgp"）。"""
+    engine = DraftEngine(player_pool, method=method)
     return engine.simulate_draft(iterations=iterations)

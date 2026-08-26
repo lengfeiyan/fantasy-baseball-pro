@@ -10,7 +10,7 @@ echo.
 
 python -m fantasy_baseball gui
 
-if errorlevel 1 (
+if not %errorlevel% == 0 (
     echo.
     echo [错误] GUI 启动失败，请检查：
     echo   1. Python 是否在 PATH 中（命令行输入 python --version 验证）

@@ -276,7 +276,12 @@ class ScoringModel:
 
         # 2. CSV：最近一份（原子替换）+ 时间戳历史备份
         path = output_path(output_file)
-        write_csv_atomic(path, rankings)
+        try:
+            write_csv_atomic(path, rankings)
+        except OSError as e:
+            # 最近一份写失败不应中断——历史备份仍要尝试（审计低危项：
+            # 此前此处未捕获，异常直接抛出导致备份代码不执行）
+            logger.warning("写入排名最近一份 CSV 失败: %s", e)
         try:
             backup = history_path(output_file)
             rankings.to_csv(backup, index=False)

@@ -469,4 +469,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"GUI 启动失败：{e}\n请使用 --help 查看命令行子命令。", file=sys.stderr)
             return 1
 
-    return args.func(args)
+    try:
+        return args.func(args)
+    except SystemExit:
+        raise
+    except Exception as e:
+        # 审计低危项：此前业务异常（如伤病抓取断网）以裸 traceback 冒出
+        print(f"[错误] {e}", file=sys.stderr)
+        return 1

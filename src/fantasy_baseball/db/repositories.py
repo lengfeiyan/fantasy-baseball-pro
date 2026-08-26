@@ -90,7 +90,6 @@ class PlayerRepository(_BaseRepository):
     def replace_merged_pitchers(self, rows: Sequence[Dict[str, Any]]) -> int:
         self.conn.execute("DELETE FROM pitchers_merged")
         return self._insert_rows("pitchers_merged", rows)
-        return len(rows)
 
     # 读取（返回 DataFrame，供评分模块使用）
     def get_merged_hitters(self) -> pd.DataFrame:
@@ -270,12 +269,20 @@ class InjuryRepository(_BaseRepository):
 class AdpRepository(_BaseRepository):
     """ADP 快照访问（每次抓取整体替换，永远代表最新一批）。"""
 
-    def replace_all(self, rows: Sequence[Dict[str, Any]]) -> int:
-        """整体替换 ADP 快照（rows 含 name/team/pos/adp，source 可选）。"""
+    def replace_all(
+        self, rows: Sequence[Dict[str, Any]], fetched_at: Optional[str] = None
+    ) -> int:
+        """整体替换 ADP 快照（rows 含 name/team/pos/adp，source 可选）。
+
+        Args:
+            fetched_at: 显式指定数据时间（"YYYY-MM-DD HH:MM:SS"）。
+                CSV 回填时传文件 mtime——旧数据不得借回填获得全新 TTL
+                租期（审计低危项：租期曾最长翻倍）。默认当前本地时间。
+        """
         self.conn.execute("DELETE FROM adp")
         if not rows:
             return 0
-        ts = _local_now()
+        ts = fetched_at or _local_now()
         self.conn.executemany(
             """INSERT INTO adp(name, team, pos, adp, source, fetched_at)
                VALUES(?,?,?,?,COALESCE(?, 'FantasyPros'),?)""",

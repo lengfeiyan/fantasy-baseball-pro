@@ -364,3 +364,23 @@ def test_session_id_milliseconds(fresh_conn, isolated_db):
     repo.save_session("s_1", [{"round": 1, "name": "A"}])
     repo.save_session("s_2", [{"round": 1, "name": "B"}])
     assert repo.count() == 2
+
+
+def test_adp_backfill_preserves_csv_age(fresh_conn, isolated_db, monkeypatch):
+    """审计低危回归：CSV 回填写入文件 mtime，旧数据不获全新 TTL 租期。"""
+    from fantasy_baseball.core.adp import ADPCache
+
+    cache = ADPCache()
+    if not os.path.exists(cache.adp_file):
+        pytest.skip("无根目录 adp.csv")
+    # 根目录 adp.csv 的 mtime 若在 TTL 内才能走回填路径
+    monkeypatch.setattr(cache, "_cache_valid", lambda: True)
+    cache.fetch_adp(allow_network=False)
+    ts = AdpRepository(fresh_conn).latest_fetch_time()
+    assert ts is not None
+    # 回填时间应等于文件 mtime（不是 now）：用年龄验证 > 0 或等于文件年龄
+    import time as _time
+    from datetime import datetime as _dt
+    file_age = _time.time() - os.path.getmtime(cache.adp_file)
+    stored_age = _time.time() - _time.mktime(_dt.strptime(ts, "%Y-%m-%d %H:%M:%S").timetuple())
+    assert abs(stored_age - file_age) < 5

@@ -299,7 +299,7 @@ class ADPCache:
                 if not self._df.empty:
                     logger.info("从缓存加载 ADP: %s（%d 条）", self.adp_file, len(self._df))
                     self.last_source = "csv_legacy"
-                    self._backfill_db_from_csv(self._df)
+                    self._backfill_db_from_csv(self._df, self.adp_file)
                     return self._df
             except Exception as e:
                 logger.warning("读取 ADP 缓存失败: %s", e)
@@ -315,7 +315,7 @@ class ADPCache:
                     if not self._df.empty:
                         logger.info("从最近一份 CSV 加载 ADP: %s（%d 条）", latest, len(self._df))
                         self.last_source = "csv_latest"
-                        self._backfill_db_from_csv(self._df)
+                        self._backfill_db_from_csv(self._df, latest)
                         return self._df
                 except Exception as e:
                     logger.warning("读取最近一份 ADP CSV 失败: %s", e)
@@ -396,22 +396,35 @@ class ADPCache:
         except OSError as e:
             logger.warning("写入 ADP 备份失败: %s", e)
 
-    def _backfill_db_from_csv(self, df: pd.DataFrame) -> None:
+    def _backfill_db_from_csv(self, df: pd.DataFrame, source_path: str = "") -> None:
         """DB 为空且读到有效 CSV 时，把 CSV 数据回填入库（一次性迁移）。
 
         让数据库尽快成为权威源；已有 DB 数据时不动作（不覆盖新状态）。
+        审计低危修复：回填写入 CSV 的原龄（mtime）——旧数据不得借回填
+        获得全新 TTL 租期（此前租期最长翻倍）。
         """
         if not self.use_db:
             return
         try:
             from ..db import AdpRepository, db_session
 
+            fetched_at = None
+            if source_path:
+                try:
+                    fetched_at = time.strftime(
+                        "%Y-%m-%d %H:%M:%S",
+                        time.localtime(os.path.getmtime(source_path)),
+                    )
+                except OSError:
+                    pass
             with db_session() as conn:
                 repo = AdpRepository(conn)
                 if repo.count() > 0:
                     return
-                repo.replace_all(df.to_dict("records"))
-            logger.info("已从 CSV 回填 ADP 到数据库（%d 条）", len(df))
+                repo.replace_all(df.to_dict("records"), fetched_at=fetched_at)
+            logger.info(
+                "已从 CSV 回填 ADP 到数据库（%d 条，数据时间 %s）", len(df), fetched_at
+            )
         except Exception as e:
             logger.debug("ADP 回填数据库失败（忽略）: %s", e)
 

@@ -287,7 +287,7 @@ class MLBStatsClient:
                 "请检查网络后重试"
             )
 
-        txns = data.get("transactions", [])
+        txns = data.get("transactions", []) if isinstance(data, dict) else []
         injuries = []
         for t in txns:
             desc = t.get("description", "")

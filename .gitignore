@@ -53,7 +53,6 @@ venv.bak/
 logs/
 
 # 生成的报告与模拟结果
-reports/
 simulation_results/
 data_quality_report.txt
 

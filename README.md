@@ -55,6 +55,7 @@ fbtool/
 ├── config.yaml                    # 配置文件（核心）
 ├── data/                          # 输入 CSV
 ├── legacy/                        # 旧版脚本（已归档，仅供参考）
+├── docs/                         # 技术设计文档（TECHNICAL_DESIGN.md）
 ├── pyproject.toml                 # 包定义 + 依赖
 └── requirements.txt
 ```

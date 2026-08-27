@@ -1,7 +1,15 @@
 @echo off
 cd /d "%~dp0"
+rem 便携运行时优先：整个项目文件夹拷到无 Python 的电脑也能直接运行
+if exist "%~dp0runtime\python.exe" (
+    set "PY=%~dp0runtime\python.exe"
+    set "TCL_LIBRARY=%~dp0runtime\tcl\tcl8.6"
+    set "TK_LIBRARY=%~dp0runtime\tcl\tk8.6"
+) else (
+    set "PY=python"
+    set "PYTHONPATH=src"
+)
 title Fantasy Baseball Pro - CLI
-set PYTHONPATH=src
 
 :menu
 cls
@@ -51,19 +59,19 @@ if "%choice%"=="0" exit /b 0
 goto menu
 
 :fetch
-python -m fantasy_baseball fetch-projections
+"%PY%" -m fantasy_baseball fetch-projections
 goto after
 
 :rank_vorp
-python -m fantasy_baseball rank --method vorp
+"%PY%" -m fantasy_baseball rank --method vorp
 goto after
 
 :rank_sgp
-python -m fantasy_baseball rank --method sgp
+"%PY%" -m fantasy_baseball rank --method sgp
 goto after
 
 :adp
-python -m fantasy_baseball adp
+"%PY%" -m fantasy_baseball adp
 goto after
 
 :draft
@@ -76,7 +84,7 @@ set /p strategy=策略 balanced/conservative/aggressive（回车默认 balanced）:
 if "%strategy%"=="" set strategy=balanced
 set /p method=评分 vorp/sgp（回车默认 vorp）:
 if "%method%"=="" set method=vorp
-python -m fantasy_baseball draft --pick %pick% --strategy %strategy% --method %method%
+"%PY%" -m fantasy_baseball draft --pick %pick% --strategy %strategy% --method %method%
 goto after
 
 :simulate
@@ -89,7 +97,7 @@ set /p thresh=最小可用率 0-1（回车默认 0.25）:
 if "%thresh%"=="" set thresh=0.25
 set /p method=评分 vorp/sgp（回车默认 vorp）:
 if "%method%"=="" set method=vorp
-python -m fantasy_baseball simulate --user-pick %pick% --min-availability %thresh% --method %method%
+"%PY%" -m fantasy_baseball simulate --user-pick %pick% --min-availability %thresh% --method %method%
 goto after
 
 :sleeper
@@ -99,19 +107,19 @@ set /p minadp=最小 ADP（回车默认 80）:
 if "%minadp%"=="" set minadp=80
 set /p maxadp=最大 ADP（回车默认 300）:
 if "%maxadp%"=="" set maxadp=300
-python -m fantasy_baseball sleeper --min-adp %minadp% --max-adp %maxadp%
+"%PY%" -m fantasy_baseball sleeper --min-adp %minadp% --max-adp %maxadp%
 goto after
 
 :roster
-python -m fantasy_baseball roster show
+"%PY%" -m fantasy_baseball roster show
 goto after
 
 :validate
-python -m fantasy_baseball validate draft_log_pick5_balanced.csv --analyze
+"%PY%" -m fantasy_baseball validate draft_log_pick5_balanced.csv --analyze
 goto after
 
 :fa_update
-python -m fantasy_baseball fa update-fa
+"%PY%" -m fantasy_baseball fa update-fa
 goto after
 
 :fa_recommend
@@ -124,11 +132,11 @@ set /p risk=风险偏好 balanced/conservative/aggressive（回车默认 balanced）:
 if "%risk%"=="" set risk=balanced
 set /p method=评分 vorp/sgp（回车默认 vorp）:
 if "%method%"=="" set method=vorp
-python -m fantasy_baseball fa recommend --position %pos% --risk %risk% --method %method%
+"%PY%" -m fantasy_baseball fa recommend --position %pos% --risk %risk% --method %method%
 goto after
 
 :injury
-python -m fantasy_baseball fa update-injury
+"%PY%" -m fantasy_baseball fa update-injury
 goto after
 
 :mlb
@@ -138,7 +146,7 @@ if "%player%"=="" (
     echo [提示] 未输入姓名，返回菜单
     goto after
 )
-python -m fantasy_baseball mlb "%player%" --statcast
+"%PY%" -m fantasy_baseball mlb "%player%" --statcast
 goto after
 
 :gui

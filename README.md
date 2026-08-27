@@ -70,6 +70,16 @@ fbtool/
 - **`run_gui.bat`** —— 启动图形界面
 - **`run_cli.bat`** —— 命令行交互菜单（14 项常用操作，带参数提示，输 0 退出）
 
+**免安装便携模式**：两个 bat 会自动探测项目内的 `runtime\`（嵌入式 Python
++ pandas/numpy/PyYAML + tkinter，约 160MB）。把整个项目文件夹拷到**没有
+安装 Python** 的电脑上，双击 bat 即可直接运行；开发机上没有 runtime 时
+自动回落到系统 Python。runtime 为二进制不入 git，组装方法：
+下载 [Python 3.7.9 嵌入式包](https://www.python.org/ftp/python/3.7.9/python-3.7.9-embed-amd64.zip)
+解压到 `runtime/`，按 `runtime/python37._pth` 启用 site-packages 与 `..\src`，
+get-pip 后 `pip install "pandas<1.4" "numpy<1.22" pyyaml`，再从本机 Anaconda
+拷入 `DLLs/_tkinter.pyd`、`tcl86t.dll/tk86t.dll/zlib1.dll`、`Lib/tkinter`、
+`tcl/tcl8.6` 与 `tcl/tk8.6`（bat 已设置 TCL_LIBRARY/TK_LIBRARY）。
+
 ### 安装
 
 ```bash

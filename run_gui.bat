@@ -1,5 +1,14 @@
 @echo off
 cd /d "%~dp0"
+rem 便携运行时优先：整个项目文件夹拷到无 Python 的电脑也能直接运行
+if exist "%~dp0runtime\python.exe" (
+    set "PY=%~dp0runtime\python.exe"
+    set "TCL_LIBRARY=%~dp0runtime\tcl\tcl8.6"
+    set "TK_LIBRARY=%~dp0runtime\tcl\tk8.6"
+) else (
+    set "PY=python"
+    set "PYTHONPATH=src"
+)
 title Fantasy Baseball Pro - GUI
 set PYTHONPATH=src
 
@@ -8,7 +17,7 @@ echo   Fantasy Baseball Pro 图形界面
 echo ============================================
 echo.
 
-python -m fantasy_baseball gui
+"%PY%" -m fantasy_baseball gui
 
 if not %errorlevel% == 0 (
     echo.

@@ -91,3 +91,5 @@ coverage.xml
 .DS_Store
 Thumbs.db
 desktop.ini
+# 便携 Python 运行时（160MB 二进制，不入库；组装说明见 README）
+runtime/

@@ -292,30 +292,22 @@ class TestTabModules:
 # 辅助
 # ============================================================
 def _process_events(app, timeout=2.0):
-    """处理 tkinter 事件循环，直到 timeout 或队列为空。
+    """泵事件循环并驱动**真实** _poll_queue 分发。
 
-    轮询 _msg_queue 并执行回调（模拟主线程的 _poll_queue）。
+    CI 首跑发现：旧实现手动执行队列回调，绕过了轮询器的容错保护，
+    且与 after 调度的真轮询器竞争消费消息——快机器上助手先抢到 error
+    消息，on_error 的异常从测试助手本身抛出。现在只负责泵事件 +
+    调用 app._poll_queue()（生产同一条代码路径）。
     """
-    import queue
     deadline = time.time() + timeout
+    idle_ticks = 0
     while time.time() < deadline:
         app.root.update()
-        try:
-            kind, payload, cb = app._msg_queue.get_nowait()
-            if kind == "done":
-                app._enable_progress(False)
-                app.set_status("完成")
-                if cb:
-                    cb(payload)
-            elif kind == "cancelled":
-                app._enable_progress(False)
-                app.set_status("已取消")
-            elif kind == "error":
-                app._enable_progress(False)
-                app.set_status("出错")
-                if cb:
-                    cb(payload)
-            elif kind == "status":
-                app.set_status(str(payload))
-        except queue.Empty:
-            time.sleep(0.02)
+        app._poll_queue()
+        if app._msg_queue.empty() and app._active_tasks <= 0:
+            idle_ticks += 1
+            if idle_ticks >= 5:
+                break
+        else:
+            idle_ticks = 0
+        time.sleep(0.02)

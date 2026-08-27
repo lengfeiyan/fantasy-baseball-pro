@@ -211,6 +211,11 @@ def output_path(filename: str) -> str:
     return os.path.join(out_dir, os.path.basename(filename))
 
 
+# history_path 进程内同毫秒去重（CI 快机器上连续两次调用可落在同一毫秒）
+_hist_last_stamp = ""
+_hist_seq = 0
+
+
 def history_path(filename: str) -> str:
     """生成带时间戳的历史备份路径：output/history/<名>_<时间戳>.csv。
 
@@ -218,9 +223,17 @@ def history_path(filename: str) -> str:
     时间戳文件，不再覆盖；DB 始终保存当前状态。
 
     审计修复：时间戳含毫秒 + 已存在时追加序号——同秒两次生成不再
-    静默覆盖（与「永不覆盖」的承诺一致）。
+    静默覆盖（与「永不覆盖」的承诺一致）。CI 实测快机器上连续调用可
+    落在同一毫秒，进程内再用递增序号兜底。
     """
+    global _hist_last_stamp, _hist_seq
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S%f")[:-3]
+    if stamp == _hist_last_stamp:
+        _hist_seq += 1
+        stamp = f"{stamp}_{_hist_seq}"
+    else:
+        _hist_last_stamp = stamp
+        _hist_seq = 0
     base = os.path.basename(filename)
     stem = base[:-4] if base.lower().endswith(".csv") else base
     history_dir = os.path.join(PROJECT_ROOT, "output", "history")

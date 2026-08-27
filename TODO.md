@@ -104,16 +104,6 @@
 
 ## 📋 待实施
 
-### P4a：ESPN 联盟平台接入（FA 池 + 阵容自动同步）
-- **状态**：方案已定稿，待实施 → 详见 [PLAN_P4_LEAGUE_PLATFORM.md](PLAN_P4_LEAGUE_PLATFORM.md)
-- **结论**：ESPN Fantasy API v3 已实测可用（公开联盟免认证，私盟需 SWID/espn_s2 cookie）；统一 LeagueProvider 抽象同时覆盖 Yahoo
-- **实施顺序**（8 步）：
-  1. 用户机器 curl 验证 ESPN 连通性
-  2. `data_fetch/league_api.py`（LeagueProvider 抽象 + ESPNProvider）+ `tests/test_espn.py`
-  3. config 新增 `league_platform` 段 + GUI「联盟平台绑定」区
-  4. `RealTimeData` 改造（FA 池同步走 ESPN / 新增阵容同步）+ GUI/CLI 接入
-  5. 全套测试 + USER_GUIDE 文档 + 提交
-
 ### F1：模拟战绩榜（Projected Standings）★ 强烈推荐
 - **价值**：SGP 体系的杀手级应用——把阵容各类别加总按 SGP 分母折算成预计名次积分，
   输出 12 队模拟战绩榜（"我这个阵容 HR 争第 2、SB 只能第 9"），比 VORP 总分直观一个量级
@@ -159,6 +149,19 @@
 - **数据**：Pitch Arsenal（球种构成/逐球球速/逐球挥空率），需两季快照对比
 - **价值**：新增球种、速球球速 +1.5mph、whiff 率跃升——投手 sleeper 最强先行指标
 - **成本**：中-高（跨季对比 + 快照缓存设计）
+
+### P4a：ESPN 联盟平台接入（FA 池 + 阵容自动同步）——优先级已调低（2026-08-27）
+- **状态**：方案已定稿但延后；本机直连已验证可用（公开联盟免认证，私盟需 SWID/espn_s2
+  cookie）；统一 LeagueProvider 抽象同时覆盖 Yahoo → 详见
+  [PLAN_P4_LEAGUE_PLATFORM.md](PLAN_P4_LEAGUE_PLATFORM.md)
+- **依赖提醒**：F5（逐周对手分析）依赖本项的真实联盟数据，届时需先完成此
+  项或提供等效数据
+- **实施顺序**（8 步）：
+  1. ~~用户机器 curl 验证 ESPN 连通性~~（已完成 ✓）
+  2. `data_fetch/league_api.py`（LeagueProvider 抽象 + ESPNProvider）+ `tests/test_espn.py`
+  3. config 新增 `league_platform` 段 + GUI「联盟平台绑定」区
+  4. `RealTimeData` 改造（FA 池同步走 ESPN / 新增阵容同步）+ GUI/CLI 接入
+  5. 全套测试 + USER_GUIDE 文档 + 提交
 
 ### E1：重打 Windows exe（打包成果已落后 20+ 提交，做完功能批次后执行）
 

@@ -257,6 +257,81 @@ class MLBStatsClient:
         self._save_cache(cache_key, result)
         return result
 
+    # -------------------------------------------------------------- 赛季 holds
+    def fetch_season_holds(self, season: int) -> Dict[str, int]:
+        """拉取某赛季全体投手的 holds（姓名 → 赛季总 holds）。
+
+        背景：FantasyPros 预测页没有 HOLD 列（已实测确认），而 VORP 投手
+        权重含 HOLD——本方法用 MLB Stats API 的「上赛季真实 holds」补源。
+        比率/计数类预测缺列的处理原则一致：有精确数据就补精确数据。
+
+        实现：遍历 30 支球队 roster + hydrate 上赛季投手统计。注：
+        - ``/api/v1/stats?stats=season`` 端点带资格过滤（只返回 ~50 名
+          合格先发），拿不到中继投手，故走 roster 路线；
+        - 交易球员的 splits 按队拆分（如 Bednar 出现 3 段），按人求和；
+        - 当前不在任何大名单 roster 的球员会缺失（对预测池影响极小）。
+
+        结果整包缓存（历史静态数据，30 天 TTL 足够）。
+        """
+        cache_key = f"season_holds_{season}"
+        cached = self._load_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        teams = _http_get_json(f"{BASE_URL}/teams?sportId=1&season={season}")
+        if not teams or not teams.get("teams"):
+            logger.warning("获取球队列表失败，holds 补源跳过")
+            return {}
+
+        holds: Dict[str, int] = {}
+        n_teams = 0
+        for team in teams["teams"]:
+            team_id = team.get("id")
+            if not team_id:
+                continue
+            url = (
+                f"{BASE_URL}/teams/{team_id}/roster"
+                f"?hydrate=person(stats(group=[pitching],type=[season],season={season}))"
+            )
+            data = _http_get_json(url, timeout=30)
+            if not data or not data.get("roster"):
+                continue
+            n_teams += 1
+            for entry in data["roster"]:
+                stats_blocks = entry.get("person", {}).get("stats")
+                if not stats_blocks:
+                    continue
+                splits = stats_blocks[0].get("splits", [])
+                # hydrate 返回两类 split：无 team 字段的是赛季汇总，
+                # 有 team 的是交易分队明细（两者数值相等）。实测曾把
+                # 汇总+分队全加起来导致 holds 翻倍（Rogers 32→64）。
+                player_holds = 0
+                for split in splits:
+                    h = _safe_int(split.get("stat", {}).get("holds"))
+                    if not h:
+                        continue
+                    if split.get("team"):
+                        player_holds += h
+                if player_holds == 0 and splits:
+                    # 没有分队明细（整个赛季未换队）：取汇总 split
+                    for split in splits:
+                        if not split.get("team"):
+                            player_holds = _safe_int(
+                                split.get("stat", {}).get("holds")
+                            ) or 0
+                            break
+                if player_holds:
+                    name = entry["person"].get("fullName", "").strip()
+                    # 同一球员可能出现在多队 roster（休赛期换队），取最大值
+                    holds[name] = max(holds.get(name, 0), player_holds)
+
+        logger.info(
+            "赛季 holds 补源完成：%d 队，holds 非零球员 %d 名（%d 赛季）",
+            n_teams, len(holds), season,
+        )
+        self._save_cache(cache_key, holds)
+        return holds
+
     # -------------------------------------------------------------- 伤病
     def fetch_injuries(
         self, start_date: str, end_date: str

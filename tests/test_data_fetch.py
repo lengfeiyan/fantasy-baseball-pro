@@ -293,3 +293,40 @@ def test_fetch_injuries_network_failure_raises(tmpdir, monkeypatch):
     )
     with pytest.raises(RuntimeError, match="无法访问"):
         client.fetch_injuries("2026-08-01", "2026-08-16")
+
+
+# -------------------------------------------------------------- 赛季 holds 补源
+def test_fetch_season_holds_aggregation(tmpdir, monkeypatch):
+    """回归：hydrate 返回『赛季汇总 split（无 team）+ 分队明细 split（有 team）』，
+    两类数值相等——聚合规则必须取其一（曾全加导致 Rogers 32→64 翻倍）。
+    """
+    from fantasy_baseball.data_fetch.mlb_api import MLBStatsClient
+
+    def fake_get(url, timeout=15):
+        if url.startswith("https://statsapi.mlb.com/api/v1/teams?"):
+            return {"teams": [{"id": 111}, {"id": 222}]}
+        if "teams/111/roster" in url:
+            return {"roster": [
+                {"person": {"fullName": "Traded Guy", "stats": [{"splits": [
+                    # 无 team = 赛季汇总 32；分队 12+20=32 —— 只能算一次
+                    {"stat": {"holds": 32, "gamesPitched": 81}},
+                    {"team": {"name": "Mets"}, "stat": {"holds": 12, "gamesPitched": 28}},
+                    {"team": {"name": "Giants"}, "stat": {"holds": 20, "gamesPitched": 53}},
+                ]}]}, "position": {"abbreviation": "P"}},
+                {"person": {"fullName": "One Team Guy", "stats": [{"splits": [
+                    {"stat": {"holds": 10, "gamesPitched": 70}},   # 只有汇总
+                ]}]}, "position": {"abbreviation": "P"}},
+                {"person": {"fullName": "Starter", "stats": [{"splits": [
+                    {"stat": {"holds": 0, "gamesPitched": 30}},
+                ]}]}, "position": {"abbreviation": "P"}},
+            ]}
+        return {}  # 222 队无数据（容错）
+
+    client = MLBStatsClient(cache_dir=str(tmpdir))
+    monkeypatch.setattr(
+        "fantasy_baseball.data_fetch.mlb_api._http_get_json", fake_get
+    )
+    holds = client.fetch_season_holds(2025)
+    assert holds["Traded Guy"] == 32      # 不再是 64
+    assert holds["One Team Guy"] == 10    # 仅汇总 split 的球员正常取
+    assert "Starter" not in holds         # 0 holds 不入表

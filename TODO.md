@@ -165,6 +165,11 @@
 
 以下在本次开发中已实现，记录在此供追溯：
 
+### 2026-08-27 完成（HOLD 数据补源）
+- [x] FantasyPros 预测页无 HOLD 列（实测确认）→ MLB Stats API 上赛季真实 holds 补源
+      （30 队 roster+hydrate，交易球员分队 split 正确聚合不重复计数，149/941 名投手回填）
+- 测试 207 → 209 passed
+
 ### 2026-08-20 完成（数据统一入库）
 - [x] DB 成为唯一当前数据源：新增 adp/rankings/draft_logs/fa_recommendations 四张表 + 四个仓储
 - [x] ADP 管道：DB 优先（TTL 看 fetched_at）→ CSV 回退 → 抓取写库；CSV 有效且 DB 空时自动回填

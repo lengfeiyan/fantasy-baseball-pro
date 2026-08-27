@@ -87,6 +87,13 @@ class DataIngestor:
         hitters_df = fetch_projections("hitters", season)
         pitchers_df = fetch_projections("pitchers", season)
 
+        # HOLD 补源：FantasyPros 预测页没有 HOLD 列（已实测确认），用
+        # MLB Stats API 的上一完整赛季真实 holds 按姓名回填，否则 VORP
+        # 投手权重里的 HOLD 项恒为 0，中继投手被系统性低估
+        hold_col = pitchers_df.get("HOLD")
+        if hold_col is None or hold_col.fillna(0).sum() == 0:
+            pitchers_df = self._enrich_holds(pitchers_df, season)
+
         # 准备入库数据（保留 VORP + SGP 所需列），按 name 去重避免 UNIQUE 冲突
         # eligible_pos：FantasyPros 抓取时计算的多位置资格，scoring 的
         # 多位置 VORP 依赖它（修复审计项：此前被丢弃，逻辑成死代码）
@@ -216,6 +223,45 @@ class DataIngestor:
         n = self._run(_do)
         logger.info("导入 %d 条 %s 数据", n, player_type)
         return n
+
+    def _enrich_holds(self, pitchers_df, season: int):
+        """用 MLB Stats API 上一完整赛季的 holds 为预测数据回填 HOLD 列。
+
+        匹配：姓名精确 + 大小写不敏感；未匹配的球员 HOLD=0
+        （先发/无 hold 记录者本就应为 0）。
+        """
+        try:
+            from ..data_fetch.mlb_api import MLBStatsClient
+        except ImportError:
+            logger.warning("mlb_api 不可用，跳过 HOLD 补源")
+            return pitchers_df
+
+        # 上赛季 = 当前预测赛季的上一个完整赛季
+        holds_season = season - 1
+        try:
+            holds = MLBStatsClient().fetch_season_holds(holds_season)
+        except Exception as e:
+            logger.warning("获取 %d 赛季 holds 失败，跳过补源: %s", holds_season, e)
+            return pitchers_df
+
+        if not holds:
+            return pitchers_df
+
+        def _norm(name: str) -> str:
+            """压缩全部空白 + 小写（跨源姓名匹配：大小写/多空格差异）。"""
+            return " ".join(str(name).split()).casefold()
+
+        lookup = {_norm(k): v for k, v in holds.items()}
+        pitchers_df = pitchers_df.copy()
+        pitchers_df["HOLD"] = (
+            pitchers_df["name"].map(_norm).map(lookup).fillna(0)
+        )
+        matched = int((pitchers_df["HOLD"] > 0).sum())
+        logger.info(
+            "HOLD 补源：预测池 %d 名投手中 %d 名有 %d 赛季 holds 记录",
+            len(pitchers_df), matched, holds_season,
+        )
+        return pitchers_df
 
     def _resolve_player_file(self, player_type: str, source: str) -> str:
         """解析某数据源的文件路径。"""

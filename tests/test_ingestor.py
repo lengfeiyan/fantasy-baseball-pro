@@ -146,3 +146,21 @@ def test_ingestor_multi_source_nan_weight_normalized(fresh_conn, tmpdir, monkeyp
     assert df.iloc[0]["HR"] == pytest.approx(30.0, abs=0.001)
     # 两源都有的 R：0.7×100 + 0.3×120 = 106
     assert df.iloc[0]["R"] == pytest.approx(0.7 * 100 + 0.3 * 120, abs=0.01)
+
+
+def test_enrich_holds_backfill(fresh_conn, monkeypatch):
+    """HOLD 补源：按姓名回填、未匹配为 0、大小写不敏感。"""
+    import pandas as pd
+    from fantasy_baseball.core.ingestor import DataIngestor
+
+    monkeypatch.setattr(
+        "fantasy_baseball.data_fetch.mlb_api.MLBStatsClient.fetch_season_holds",
+        lambda self, season: {"Tyler Rogers": 32, "jeff hoffman": 20},
+    )
+    ing = DataIngestor(conn=fresh_conn)
+    df = pd.DataFrame({
+        "name": ["TYLER   rogers", "Jeff Hoffman", "Nobody"],
+        "pos": ["RP"] * 3,
+    })
+    out = ing._enrich_holds(df, season=2026)
+    assert out["HOLD"].tolist() == [32, 20, 0]

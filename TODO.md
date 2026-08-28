@@ -153,7 +153,7 @@
 ### P4a：ESPN 联盟平台接入（FA 池 + 阵容自动同步）——优先级已调低（2026-08-27）
 - **状态**：方案已定稿但延后；本机直连已验证可用（公开联盟免认证，私盟需 SWID/espn_s2
   cookie）；统一 LeagueProvider 抽象同时覆盖 Yahoo → 详见
-  [PLAN_P4_LEAGUE_PLATFORM.md](PLAN_P4_LEAGUE_PLATFORM.md)
+  [PLAN_P4_LEAGUE_PLATFORM.md](docs/PLAN_P4_LEAGUE_PLATFORM.md)
 - **依赖提醒**：F5（逐周对手分析）依赖本项的真实联盟数据，届时需先完成此
   项或提供等效数据
 - **实施顺序**（8 步）：

@@ -93,3 +93,6 @@ Thumbs.db
 desktop.ini
 # 便携 Python 运行时（160MB 二进制，不入库；组装说明见 README）
 runtime/
+# 数据输出目录（DB 为唯一当前数据源，CSV 仅为备份）
+output/
+

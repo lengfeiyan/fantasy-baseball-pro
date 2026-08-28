@@ -249,7 +249,7 @@ final_score   = overall_value × (1 + need_factor×0.5) × risk_adjustment
 
 ## 11. 已知限制与演进路线
 
-- **P4a ESPN 联盟接入**：方案已定稿（`PLAN_P4_LEAGUE_PLATFORM.md`），LeagueProvider 抽象预留 Yahoo（大陆网络封锁暂缓）
+- **P4a ESPN 联盟接入**：方案已定稿（`docs/PLAN_P4_LEAGUE_PLATFORM.md`），LeagueProvider 抽象预留 Yahoo（大陆网络封锁暂缓）
 - F1 模拟战绩榜 / F2 GUI 表格化 / F3 Streaming 建议 / F4 交易评估 / F5 逐周对手 / F6 SGP 分母校准（见 TODO.md）
 - SGP 分母为 12 队经验值，未按联盟历史校准
 - risk model 的 z_score 假设同方差；numba 加速仅蒙特卡洛核心

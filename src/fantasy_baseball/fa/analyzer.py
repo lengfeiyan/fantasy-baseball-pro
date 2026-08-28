@@ -80,6 +80,10 @@ class FAAnalyzer:
             "1B": 0.9, "OF": 0.85, "SP": 1.0, "RP": 1.15,
         }
         self.injury_factors = dict(INJURY_FACTORS)
+        # S1：Savant 百分位快照（懒加载，按姓名索引）。
+        # statcast_score 优先用官方百分位归一（永不量级错配），
+        # 快照无此球员时回退手调基准公式。
+        self._pct_index: Optional[Dict[str, Dict[str, Any]]] = None
 
     # -------------------------------------------------------------- FA 池
     def get_fa_pool(self, position: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -104,6 +108,20 @@ class FAAnalyzer:
         statcast_score = self._calculate_statcast_score(stats)
         overall = self._calculate_overall_value(position_adjusted, trend_score, statcast_score)
 
+        # S2 运气调整：实际 wOBA 显著高于期望（虚高）温和降权、反之升权
+        luck = self._get_luck_row(str(stats.get("name") or ""))
+        luck_adj = 1.0
+        woba_luck = None
+        if luck is not None:
+            woba, est_woba = _safe_f(luck.get("woba")), _safe_f(luck.get("est_woba"))
+            if woba is not None and est_woba is not None:
+                woba_luck = round(woba - est_woba, 3)
+                if woba_luck >= 0.030:
+                    luck_adj = 0.97   # 状态虚热
+                elif woba_luck <= -0.030:
+                    luck_adj = 1.03   # 运气差，真实实力被低估
+        overall = overall * luck_adj
+
         return {
             "player_id": player_id,
             "name": stats.get("name"),
@@ -114,6 +132,9 @@ class FAAnalyzer:
             "position_adjusted_value": position_adjusted,
             "statcast_score": statcast_score,
             "overall_value": overall,
+            # S2 运气指数（wOBA − xwOBA，正 = 虚高；None = 无记录/快照不可用）
+            "woba_luck": woba_luck,
+            "luck_adjustment": luck_adj if luck_adj != 1.0 else None,
             # 真实数据不可用时降级到 mock 统计（real_time 标注），上层展示时提示
             "is_mock": bool(stats.get("is_mock", False)),
         }
@@ -218,6 +239,11 @@ class FAAnalyzer:
             return 0.0
         pos = player_stats.get("pos", "")
 
+        # S1：优先用 Savant 百分位快照归一（50 为基准，永不量级错配）
+        pct_score = self._statcast_score_from_percentiles(player_stats.get("name"), pos)
+        if pct_score is not None:
+            return pct_score
+
         def _comp(val, baseline: float, weight: float) -> float:
             """单组件贡献：(值 - 联盟典型值) × 权重；缺失键按中性 0 跳过。
 
@@ -255,6 +281,105 @@ class FAAnalyzer:
         else:
             score = 0.0
         return float(max(0, min(score, 100)))
+
+    # -------------------------------------------------------------- S1 百分位评分
+    # 组件权重（打者/投手各一组）：score = 50 + Σ(百分位 − 50) × 权重，
+    # 天然落在 [0, 100] 且以 50 为联盟中位。低好指标（whiff 被打率等）
+    # 用 (100 − pct) 翻转。
+    _PCT_WEIGHTS_HITTER = {
+        "xwoba": 0.30, "xslg": 0.20, "brl_percent": 0.15,
+        "hard_hit_percent": 0.15, "exit_velocity": 0.10, "sprint_speed": 0.10,
+    }
+    _PCT_WEIGHTS_PITCHER = {
+        # 面对打者的 xwOBA/xera 百分位：越低越好 → 翻转
+        "xwoba": (0.30, True), "xera": (0.25, True),
+        "whiff_percent": (0.20, False), "k_percent": (0.15, False),
+        "bb_percent": (0.05, True), "fb_velocity": (0.05, False),
+    }
+
+    def _statcast_score_from_percentiles(
+        self, name: Optional[str], pos: str
+    ) -> Optional[float]:
+        """用 Savant 百分位快照算 statcast_score。
+
+        Returns:
+            0-100 的分值；快照无此球员 / 快照不可用 → None（回退手调公式）。
+        """
+        if not name:
+            return None
+        row = self._get_pct_row(str(name))
+        if row is None:
+            return None
+
+        def _pct(v) -> Optional[float]:
+            p = _safe_f(v)
+            if p is None:
+                return None
+            return float(p)
+
+        score = 50.0
+        if pos in PITCHER_POSITIONS:
+            for key, (w, invert) in self._PCT_WEIGHTS_PITCHER.items():
+                p = _pct(row.get(key))
+                if p is None:
+                    continue
+                if invert:
+                    p = 100.0 - p
+                score += (p - 50.0) * w
+        else:
+            for key, w in self._PCT_WEIGHTS_HITTER.items():
+                p = _pct(row.get(key))
+                if p is None:
+                    continue
+                score += (p - 50.0) * w
+        return float(max(0.0, min(100.0, score)))
+
+    def _get_pct_row(self, name: str) -> Optional[Dict[str, Any]]:
+        """懒加载百分位快照并按规范姓名索引。
+
+        双向球员（如 Ohtani）在打者/投手两榜各有一行——**合并**而非覆盖
+        （后写榜会以全 None 行抹掉先写榜的有效数据）。
+        """
+        if self._pct_index is None:
+            self._pct_index = {}
+            try:
+                from ..data_fetch.savant_leaderboard import SavantLeaderboard
+
+                lb = SavantLeaderboard()
+                for ptype in ("batter", "pitcher"):
+                    rows = lb.fetch_percentiles(ptype)
+                    if rows:
+                        for r in rows:
+                            key = " ".join(r["name"].split()).casefold()
+                            existing = self._pct_index.get(key) or {}
+                            merged = {**existing, **{k: v for k, v in r.items() if v is not None}}
+                            self._pct_index[key] = merged
+            except Exception as e:
+                logger.debug("Savant 百分位快照不可用（回退手调基准）: %s", e)
+        return self._pct_index.get(" ".join(name.split()).casefold())
+
+    # S2：期望统计快照（懒加载；与百分位分开两个索引，行结构不同）
+    _luck_index: Optional[Dict[str, Dict[str, Any]]] = None
+
+    def _get_luck_row(self, name: str) -> Optional[Dict[str, Any]]:
+        """懒加载期望统计快照并按规范姓名索引（同名行合并，理由同上）。"""
+        if FAAnalyzer._luck_index is None:
+            FAAnalyzer._luck_index = {}
+            try:
+                from ..data_fetch.savant_leaderboard import SavantLeaderboard
+
+                lb = SavantLeaderboard()
+                for ptype in ("batter", "pitcher"):
+                    rows = lb.fetch_expected_stats(ptype)
+                    if rows:
+                        for r in rows:
+                            key = " ".join(r["name"].split()).casefold()
+                            existing = FAAnalyzer._luck_index.get(key) or {}
+                            merged = {**existing, **{k: v for k, v in r.items() if v is not None}}
+                            FAAnalyzer._luck_index[key] = merged
+            except Exception as e:
+                logger.debug("Savant 期望统计快照不可用: %s", e)
+        return FAAnalyzer._luck_index.get(" ".join(name.split()).casefold())
 
     def _calculate_overall_value(
         self, position_adjusted: float, trend_score: float, statcast_score: float

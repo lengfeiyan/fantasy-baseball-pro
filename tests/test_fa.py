@@ -326,3 +326,93 @@ def test_unified_injury_factors_no_double_punish(fresh_conn, monkeypatch):
     assert conservative < balanced < aggressive
     # 与 analyzer 的价值折减叠加后：0.30 × 0.65 = 0.195（旧双重惩罚 0.15×0.3=0.045）
     assert INJURY_FACTORS["long_term"] * balanced > 0.15
+
+
+# ============================================================
+# S1/S2：Savant 百分位评分 + 运气指数
+# ============================================================
+def test_statcast_score_from_percentiles(fresh_conn, monkeypatch):
+    """百分位评分：50 基准 + (百分位−50)×权重；精英/中位/低档区分正确。"""
+    from fantasy_baseball.fa.analyzer import FAAnalyzer
+
+    snapshot = {
+        "star guy": {"xwoba": 99, "xslg": 98, "brl_percent": 97,
+                     "hard_hit_percent": 96, "exit_velocity": 95, "sprint_speed": 90},
+        "mid guy": {"xwoba": 50, "xslg": 50, "brl_percent": 50,
+                    "hard_hit_percent": 50, "exit_velocity": 50, "sprint_speed": 50},
+        "weak guy": {"xwoba": 5, "xslg": 8, "brl_percent": 6,
+                     "hard_hit_percent": 4, "exit_velocity": 3, "sprint_speed": 10},
+    }
+
+    class FakeLB:
+        def fetch_percentiles(self, ptype):
+            return [{"name": k.title(), **v} for k, v in snapshot.items()]
+
+    import fantasy_baseball.data_fetch.savant_leaderboard as sl
+    monkeypatch.setattr(sl.SavantLeaderboard, "fetch_percentiles",
+                        lambda self, ptype: FakeLB().fetch_percentiles(ptype))
+
+    a = FAAnalyzer(conn=fresh_conn)
+    elite = a._statcast_score_from_percentiles("Star Guy", "OF")
+    mid = a._statcast_score_from_percentiles("Mid Guy", "OF")
+    weak = a._statcast_score_from_percentiles("Weak Guy", "OF")
+    assert elite > 90 and mid == pytest.approx(50.0, abs=1.0) and weak < 10
+    # 缺失行 → None（回退手调公式），不崩溃
+    assert a._statcast_score_from_percentiles("Unknown", "OF") is None
+
+
+def test_percentile_merge_two_way_player(fresh_conn, monkeypatch):
+    """回归：双向球员（Ohtani 类）在打者/投手两榜各一行，合并而非覆盖。
+
+    投手行全 None 曾覆盖打者行有效数据 → 精英球员拿中性 50。
+    """
+    import fantasy_baseball.data_fetch.savant_leaderboard as sl
+    from fantasy_baseball.fa.analyzer import FAAnalyzer
+
+    boards = {
+        "batter": [{"name": "Two Way", "xwoba": 99, "xslg": 98, "brl_percent": 97,
+                    "hard_hit_percent": 96, "exit_velocity": 95, "sprint_speed": 90}],
+        "pitcher": [{"name": "Two Way", "fb_velocity": 95}],  # 其余全 None
+    }
+
+    class FakeLB:
+        def fetch_percentiles(self, ptype):
+            return boards[ptype]
+
+    monkeypatch.setattr(sl.SavantLeaderboard, "fetch_percentiles",
+                        lambda self, ptype: FakeLB().fetch_percentiles(ptype))
+
+    a = FAAnalyzer(conn=fresh_conn)
+    score = a._statcast_score_from_percentiles("Two Way", "UTIL")
+    assert score > 90  # 打者榜数据未被投手行抹掉
+
+
+def test_luck_row_values(fresh_conn, monkeypatch):
+    """S2：期望统计快照检索 + wOBA−xwOBA 运气值方向。"""
+    import fantasy_baseball.data_fetch.savant_leaderboard as sl
+    from fantasy_baseball.fa.analyzer import FAAnalyzer
+
+    boards = {
+        "batter": [
+            {"name": "Hot Hand", "woba": 0.360, "est_woba": 0.310},   # +0.05 虚高
+            {"name": "Unlucky", "woba": 0.270, "est_woba": 0.320},    # −0.05 低估
+            {"name": "Normal", "woba": 0.300, "est_woba": 0.305},     # 差异小
+        ],
+        "pitcher": [],
+    }
+
+    class FakeLB:
+        def fetch_expected_stats(self, ptype):
+            return boards[ptype]
+
+    monkeypatch.setattr(sl.SavantLeaderboard, "fetch_expected_stats",
+                        lambda self, ptype: FakeLB().fetch_expected_stats(ptype))
+
+    a = FAAnalyzer(conn=fresh_conn)
+    FAAnalyzer._luck_index = None  # 重置类级缓存
+    row = a._get_luck_row("Hot Hand")
+    assert row is not None and row["woba"] > row["est_woba"]
+    for name, expect_luck in (("Hot Hand", 0.05), ("Unlucky", -0.05), ("Normal", -0.005)):
+        r = a._get_luck_row(name)
+        luck = round(r["woba"] - r["est_woba"], 3)
+        assert abs(luck - expect_luck) < 0.001

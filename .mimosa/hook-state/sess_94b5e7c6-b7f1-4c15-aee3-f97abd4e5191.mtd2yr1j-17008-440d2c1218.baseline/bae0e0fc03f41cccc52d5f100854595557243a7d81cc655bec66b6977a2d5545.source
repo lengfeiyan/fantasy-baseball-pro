@@ -1,0 +1,332 @@
+"""数据抓取层测试。
+
+测试不依赖网络的部分：字段映射、伤病解析、位置归一化、缓存逻辑。
+网络相关用 monkeypatch mock。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+
+import pytest
+
+from fantasy_baseball.data_fetch.mlb_api import (
+    MLBStatsClient,
+    _parse_injury_transaction,
+    _safe_float,
+    _safe_int,
+    _calc_per9,
+)
+from fantasy_baseball.fa.analyzer import _normalize_pos
+
+
+# -------------------------------------------------------------- 辅助函数
+def test_safe_float_handles_mlb_format():
+    """MLB 的 AVG 是 '.282' 格式。"""
+    assert _safe_float(".282") == 0.282
+    assert _safe_float("2.21") == 2.21
+    assert _safe_float(None) is None
+    assert _safe_float("") is None
+    assert _safe_float("-") is None
+
+
+def test_safe_float_preserves_negative_sign():
+    """回归 L3：负号必须保留（"-0.5" 不能变 0.5）。"""
+    assert _safe_float("-0.5") == -0.5
+    assert _safe_float("-.---") is None
+    assert _safe_float("---") is None
+
+
+def test_safe_int():
+    assert _safe_int("55") == 55
+    assert _safe_int(None) is None
+    assert _safe_int("") is None
+
+
+def test_calc_per9():
+    """K/9 计算，IP 格式 '195.1' = 195又1/3局。"""
+    # 200 K / 195.1 IP ≈ 9.22
+    k9 = _calc_per9(200, "195.1")
+    assert k9 == pytest.approx(9.22, abs=0.01)
+    # 180 K / 100 IP = 16.2
+    assert _calc_per9(180, "100") == 16.2
+    # 0 局返回 None
+    assert _calc_per9(10, "0") is None
+    assert _calc_per9(None, "100") is None
+
+
+def test_calc_per9_with_two_thirds():
+    """IP '.2' 表示 2/3 局。"""
+    # 6 K / 5.2 IP = 6 / (5 + 2/3) * 9 ≈ 9.53
+    k9 = _calc_per9(6, "5.2")
+    assert k9 == pytest.approx(9.53, abs=0.05)
+
+
+# -------------------------------------------------------------- 伤病解析
+def test_parse_injury_10_day():
+    """10-day IL → mild。"""
+    t = {
+        "description": "Texas Rangers placed C Jonah Heim on the 10-day injured list. Right knee soreness.",
+        "person": {"id": 641698, "fullName": "Jonah Heim"},
+        "effectiveDate": "2026-07-15",
+    }
+    result = _parse_injury_transaction(t)
+    assert result["name"] == "Jonah Heim"
+    assert result["player_id"] == 641698
+    assert result["severity"] == "mild"
+    assert "knee" in result["injury_type"].lower()
+    assert result["status"] == "IL"
+    assert result["team"] == "Texas Rangers"  # team 从描述解析
+
+
+def test_parse_injury_activated_is_recovered():
+    """回归（审计项）：MLB 复出用 "activated ... from the N-day injured list"。
+
+    旧实现只认 reinstated（实测 110 条 IL 记录中出现 0 次），激活记录被
+    当成现行 IL，伤病惩罚永不解除。
+    """
+    t = {
+        "description": "Houston Astros activated RHP Ronel Blanco from the 60-day injured list.",
+        "person": {"id": 671298, "fullName": "Ronel Blanco"},
+        "effectiveDate": "2026-08-01",
+    }
+    result = _parse_injury_transaction(t)
+    assert result["status"] == "recovered"
+    assert result["team"] == "Houston Astros"  # 动词列表补 activated 后可解析
+
+
+def test_parse_injury_transfer_takes_target_days():
+    """回归（审计项）：转会计入目标 IL 天数，而非转出名单。
+
+    "from the 10-day ... to the 60-day injured list" 应判 severe，
+    旧实现取第一个匹配（10 天）错判 mild。
+    """
+    t = {
+        "description": "Los Angeles Dodgers transferred C Will Smith from the 10-day injured list to the 60-day injured list.",
+        "person": {"id": 656987, "fullName": "Will Smith"},
+        "effectiveDate": "2026-08-02",
+    }
+    result = _parse_injury_transaction(t)
+    assert result["severity"] == "severe"
+    assert result["status"] == "IL"
+    assert result["team"] == "Los Angeles Dodgers"
+
+
+def test_parse_injury_reinstated_still_recovered():
+    """reinstated 变体仍识别为复出。"""
+    t = {
+        "description": "Boston Red Sox reinstated 2B Vaughn Grissom from the 15-day injured list.",
+        "person": {"id": 658857, "fullName": "Vaughn Grissom"},
+        "effectiveDate": "2026-08-03",
+    }
+    result = _parse_injury_transaction(t)
+    assert result["status"] == "recovered"
+
+
+def test_parse_injury_60_day():
+    """60-day IL → severe。"""
+    t = {
+        "description": "Royals placed LHP Kris Bubic on the 60-day injured list. Left elbow soreness.",
+        "person": {"id": 679323, "fullName": "Kris Bubic"},
+        "effectiveDate": "2026-07-10",
+    }
+    result = _parse_injury_transaction(t)
+    assert result["severity"] == "severe"
+    assert "elbow" in result["injury_type"].lower()
+
+
+def test_parse_injury_15_day():
+    """15-day IL → moderate。"""
+    t = {
+        "description": "Giants placed 3B Matt Chapman on the 15-day injured list. Abdominal strain.",
+        "person": {"id": 656308, "fullName": "Matt Chapman"},
+    }
+    result = _parse_injury_transaction(t)
+    assert result["severity"] == "moderate"
+
+
+def test_parse_injury_reinstated_is_recovered():
+    """reinstated（回归）→ status=recovered。"""
+    t = {
+        "description": "Yankees reinstated CF Trent Grisham from the 10-day injured list.",
+        "person": {"id": 676324, "fullName": "Trent Grisham"},
+    }
+    result = _parse_injury_transaction(t)
+    assert result["status"] == "recovered"
+
+
+def test_parse_injury_skips_non_injured():
+    """非伤病 transaction（如签约）应返回 None。"""
+    t = {
+        "description": "Braves signed free agent OF Luis Consoro to a minor league contract.",
+        "person": {"id": 1, "fullName": "Luis Consoro"},
+    }
+    # 但 _parse_injury_transaction 假设上游已筛过，这里只验证它能处理
+    # 实际过滤在 fetch_injuries 里做（检查 "injured list" 关键字）
+
+
+# -------------------------------------------------------------- 位置归一化
+def test_normalize_pos_outfield():
+    """CF/RF/LF → OF。"""
+    assert _normalize_pos("CF") == "OF"
+    assert _normalize_pos("RF") == "OF"
+    assert _normalize_pos("LF") == "OF"
+    assert _normalize_pos("OF") == "OF"
+
+
+def test_normalize_pos_infield_unchanged():
+    assert _normalize_pos("SS") == "SS"
+    assert _normalize_pos("1B") == "1B"
+    assert _normalize_pos("C") == "C"
+
+
+def test_normalize_pos_dh_to_util():
+    assert _normalize_pos("DH") == "UTIL"
+
+
+def test_normalize_pos_empty():
+    assert _normalize_pos("") == ""
+    assert _normalize_pos(None) == ""
+
+
+# -------------------------------------------------------------- 缓存（mock 网络）
+def test_mlb_client_caches_search(tmpdir, monkeypatch):
+    """搜索结果应被缓存，第二次命中缓存。"""
+    import fantasy_baseball.data_fetch.mlb_api as mmod
+
+    call_count = [0]
+    original_get = mmod._http_get_json
+
+    def _mock_get(url, timeout=15):
+        call_count[0] += 1
+        if "search" in url:
+            return {"people": [{"id": 999, "fullName": "Cache Test"}]}
+        return original_get(url, timeout)
+
+    monkeypatch.setattr(mmod, "_http_get_json", _mock_get)
+    client = MLBStatsClient(cache_dir=str(tmpdir))
+    r1 = client.search_player("Cache Test")
+    r2 = client.search_player("Cache Test")
+    assert r1["id"] == 999
+    assert r2["id"] == 999
+    assert call_count[0] == 1  # 只请求了一次
+
+
+def test_mlb_client_search_not_found(tmpdir, monkeypatch):
+    """搜索不到返回 None。"""
+    import fantasy_baseball.data_fetch.mlb_api as mmod
+
+    monkeypatch.setattr(mmod, "_http_get_json", lambda url, timeout=15: {"people": []})
+    client = MLBStatsClient(cache_dir=str(tmpdir))
+    assert client.search_player("Nobody Exists") is None
+
+
+def test_mlb_client_fetch_injuries_filters(tmpdir, monkeypatch):
+    """fetch_injuries 应只返回含 'injured list' 的交易。"""
+    import fantasy_baseball.data_fetch.mlb_api as mmod
+
+    mock_response = {
+        "transactions": [
+            {
+                "description": "Team placed C X on the 10-day injured list. Back spasm.",
+                "person": {"id": 1, "fullName": "X"},
+                "effectiveDate": "2026-07-01",
+            },
+            {
+                "description": "Team signed free agent.",
+                "person": {"id": 2, "fullName": "Y"},
+            },
+            {
+                "description": "Team reinstated Z from the 15-day injured list.",
+                "person": {"id": 3, "fullName": "Z"},
+            },
+        ]
+    }
+    monkeypatch.setattr(mmod, "_http_get_json", lambda url, timeout=30: mock_response)
+    client = MLBStatsClient(cache_dir=str(tmpdir))
+    injuries = client.fetch_injuries("2026-07-01", "2026-07-31")
+    assert len(injuries) == 2  # 签约被过滤掉
+    names = [i["name"] for i in injuries]
+    assert "X" in names and "Z" in names and "Y" not in names
+
+
+# -------------------------------------------------------------- Statcast mock 兜底
+def test_statcast_hitter_mock_fallback(tmpdir, monkeypatch):
+    """真实数据不可用时，Statcast 应返回 mock 兜底（非空 dict）。"""
+    import fantasy_baseball.data_fetch.statcast as smod
+
+    # mock _fetch_csv 返回 None（模拟网络失败）
+    monkeypatch.setattr(smod, "_fetch_csv", lambda url: None)
+    fetcher = smod.StatcastFetcher(cache_dir=str(tmpdir))
+    result = fetcher.fetch_hitter_data(99999, season=2025)
+    assert result  # 非空
+    assert "exit_velocity" in result
+    assert "xwOBA" in result
+    assert result["type"] == "hitter"
+
+
+def test_statcast_pitcher_mock_fallback(tmpdir, monkeypatch):
+    """投手 Statcast 失败也应有 mock 兜底。"""
+    import fantasy_baseball.data_fetch.statcast as smod
+
+    monkeypatch.setattr(smod, "_fetch_csv", lambda url: None)
+    fetcher = smod.StatcastFetcher(cache_dir=str(tmpdir))
+    result = fetcher.fetch_pitcher_data(99999, season=2025)
+    assert result
+    assert "velocity" in result
+    assert "whiff_rate" in result
+    assert result["type"] == "pitcher"
+
+
+def test_fetch_injuries_network_failure_raises(tmpdir, monkeypatch):
+    """回归（审计项）：网络失败必须抛异常，不再返回空列表冒充"无伤病"。
+
+    旧实现返回 []，上层 real_time 的 RuntimeError 分支永远不可达，
+    GUI 把断网当成"该时段无伤病动态"。
+    """
+    from fantasy_baseball.data_fetch.mlb_api import MLBStatsClient
+
+    client = MLBStatsClient(cache_dir=str(tmpdir))
+    monkeypatch.setattr(
+        "fantasy_baseball.data_fetch.mlb_api._http_get_json", lambda *a, **k: None
+    )
+    with pytest.raises(RuntimeError, match="无法访问"):
+        client.fetch_injuries("2026-08-01", "2026-08-16")
+
+
+# -------------------------------------------------------------- 赛季 holds 补源
+def test_fetch_season_holds_aggregation(tmpdir, monkeypatch):
+    """回归：hydrate 返回『赛季汇总 split（无 team）+ 分队明细 split（有 team）』，
+    两类数值相等——聚合规则必须取其一（曾全加导致 Rogers 32→64 翻倍）。
+    """
+    from fantasy_baseball.data_fetch.mlb_api import MLBStatsClient
+
+    def fake_get(url, timeout=15):
+        if url.startswith("https://statsapi.mlb.com/api/v1/teams?"):
+            return {"teams": [{"id": 111}, {"id": 222}]}
+        if "teams/111/roster" in url:
+            return {"roster": [
+                {"person": {"fullName": "Traded Guy", "stats": [{"splits": [
+                    # 无 team = 赛季汇总 32；分队 12+20=32 —— 只能算一次
+                    {"stat": {"holds": 32, "gamesPitched": 81}},
+                    {"team": {"name": "Mets"}, "stat": {"holds": 12, "gamesPitched": 28}},
+                    {"team": {"name": "Giants"}, "stat": {"holds": 20, "gamesPitched": 53}},
+                ]}]}, "position": {"abbreviation": "P"}},
+                {"person": {"fullName": "One Team Guy", "stats": [{"splits": [
+                    {"stat": {"holds": 10, "gamesPitched": 70}},   # 只有汇总
+                ]}]}, "position": {"abbreviation": "P"}},
+                {"person": {"fullName": "Starter", "stats": [{"splits": [
+                    {"stat": {"holds": 0, "gamesPitched": 30}},
+                ]}]}, "position": {"abbreviation": "P"}},
+            ]}
+        return {}  # 222 队无数据（容错）
+
+    client = MLBStatsClient(cache_dir=str(tmpdir))
+    monkeypatch.setattr(
+        "fantasy_baseball.data_fetch.mlb_api._http_get_json", fake_get
+    )
+    holds = client.fetch_season_holds(2025)
+    assert holds["Traded Guy"] == 32      # 不再是 64
+    assert holds["One Team Guy"] == 10    # 仅汇总 split 的球员正常取
+    assert "Starter" not in holds         # 0 holds 不入表

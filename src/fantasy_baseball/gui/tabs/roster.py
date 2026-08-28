@@ -16,9 +16,11 @@ from ...core import RosterValidator
 from ...db import RosterRepository, db_session
 from ._widgets import (
     action_button,
+    fill_table,
     labeled_input,
     section_frame,
     set_text,
+    table_display,
     text_display,
 )
 
@@ -38,7 +40,15 @@ def create_tab(parent: tk.Widget, app) -> None:
     btn_validate_frame = ttk.Frame(parent)
     btn_validate_frame.pack(pady=4)
 
-    _, output = text_display(parent, height=14)
+    _, output = text_display(parent, height=6)
+    # F2：阵容表格
+    _, roster_table = table_display(parent, [
+        ("pos", "位置", 60, "center"),
+        ("name", "球员", 180),
+        ("team", "球队", 80, "center"),
+        ("status", "状态", 80, "center"),
+        ("slot", "槽位", 140, "center"),
+    ], height=10)
 
     def do_validate():
         # UI 线程先取值（Tk 变量不支持跨线程访问）
@@ -199,6 +209,7 @@ def create_tab(parent: tk.Widget, app) -> None:
 
         cfg = get_config()
         slots = cfg["league"]["roster_slots"]
+        pos_counts = df["pos"].value_counts().to_dict() if "pos" in df.columns else {}
 
         if n == 0:
             lines = ["阵容为空。请先从选秀日志导入。\n"]
@@ -206,13 +217,25 @@ def create_tab(parent: tk.Widget, app) -> None:
             set_text(output, "\n".join(lines))
             return
 
-        lines = [f"当前阵容（{n} 人）：\n", "-" * 50]
+        # F2：阵容表格（点列头排序）
+        rows = []
         for _, r in df.iterrows():
-            lines.append(f"  {r['pos']:<5} {r['name']}")
+            pos = r.get("pos", "")
+            required = slots.get(pos)
+            slot_txt = f"{pos_counts.get(pos, 0)}/{required}" if required else "超编/UTIL"
+            rows.append({
+                "pos": pos,
+                "name": r["name"],
+                "team": r.get("team", ""),
+                "status": r.get("status", ""),
+                "slot": slot_txt,
+            })
+        fill_table(roster_table, rows)
+
+        lines = [f"当前阵容（{n} 人），上方表格点列头排序：\n"]
 
         # 位置填充状态
-        pos_counts = df["pos"].value_counts().to_dict() if "pos" in df.columns else {}
-        lines.append("\n位置填充状态：")
+        lines.append("位置填充状态：")
         for pos, required in slots.items():
             cur = pos_counts.get(pos, 0)
             mark = "[OK]" if cur >= required else "[缺]"

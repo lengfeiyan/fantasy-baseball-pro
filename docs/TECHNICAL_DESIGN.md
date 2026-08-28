@@ -169,6 +169,7 @@ final_score   = overall_value × (1 + need_factor×0.5) × risk_adjustment
 | projections.py | FantasyPros HTML | html.parser 零依赖解析；列映射对齐内部格式；`eligible_pos` 多位置提取；PA≈AB+BB |
 | mlb_api.py | MLB Stats API | 球员搜索/统计/伤病（transactions 解析）/近 10 场趋势；网络失败 raise（与"无数据"区分）；JSON 缓存 6h |
 | statcast.py | Baseball Savant CSV | 打者/投手聚合；mock 兜底带降级语义 |
+| savant_leaderboard.py | Baseball Savant 排行榜 | 百分位/期望统计全联盟快照（CSV 端点，team= 参数），评分基准归一 + 运气指数，7 天缓存 |
 
 抓取通用约束：urllib + 浏览器 UA、JSON/CSV 缓存（`data/cache/`，mtime TTL）、全部免费无 key、断网可降级。
 

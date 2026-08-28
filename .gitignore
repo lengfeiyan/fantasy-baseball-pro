@@ -95,4 +95,5 @@ desktop.ini
 runtime/
 # 数据输出目录（DB 为唯一当前数据源，CSV 仅为备份）
 output/
-
+# Mimosa hook 内部状态（工具生成，不入库）
+.mimosa/

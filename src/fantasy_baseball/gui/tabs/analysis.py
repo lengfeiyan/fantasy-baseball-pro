@@ -47,9 +47,17 @@ def create_tab(parent: tk.Widget, app) -> None:
         ("name", "球员", 180),
         ("pos", "位置", 60, "center"),
         ("team", "球队", 70, "center"),
-        ("value", "SGP" if False else "数值", 90, "e"),
+        ("value", "数值", 90, "e"),
         ("upside", "上限", 80, "e"),
-    ], height=14)
+    ], height=8)
+    # F1：模拟战绩榜表格
+    _, standings_table = table_display(parent, [
+        ("category", "类别", 70, "center"),
+        ("team_value", "你的队", 90, "e"),
+        ("league_avg", "平均队", 90, "e"),
+        ("sgp", "SGP", 80, "e"),
+        ("exp_rank", "期望名次", 90, "e"),
+    ], height=10)
 
     def step_import():
         def _work():
@@ -190,3 +198,31 @@ def create_tab(parent: tk.Widget, app) -> None:
     action_button(btn_frame, "准备ADP", step_adp)
     action_button(btn_frame, "运行完整流水线", run_full)
     action_button(btn_frame, "查看排名", show_rankings)
+
+    def show_standings():
+        """F1 模拟战绩榜：用户阵容按 SGP 投影各类别期望名次。"""
+        from ...core.standings import ProjectedStandings
+        from ...db import RosterRepository, db_session
+
+        try:
+            with db_session() as conn:
+                roster = RosterRepository(conn).get_roster()
+            result = ProjectedStandings().project(roster)
+        except ValueError as e:
+            set_text(output, str(e))
+            return
+        except Exception as e:
+            from ..errors import friendly_error
+            set_text(output, friendly_error(e))
+            return
+
+        fill_table(standings_table, result["categories"])
+        set_text(
+            output,
+            f"模拟战绩榜（{result['league_size']} 队）：阵容相对平均队总 SGP "
+            f"{result['total_sgp']:+.2f}，总榜期望名次 {result['exp_total_rank']:.1f}。\n"
+            "其他球队为统计模拟（SGP 分母 × 经验波动）；接入 ESPN 后可换真实联盟数据。",
+        )
+        app.set_status("模拟战绩榜已生成")
+
+    action_button(btn_frame, "模拟战绩榜", show_standings)

@@ -56,6 +56,7 @@ fbtool/
 ├── data/                          # 输入 CSV
 ├── legacy/                        # 旧版脚本（已归档，仅供参考）
 ├── docs/                         # 技术设计文档（TECHNICAL_DESIGN.md）
+├── AGENTS.md                     # AI 编码代理协作约定
 ├── pyproject.toml                 # 包定义 + 依赖
 └── requirements.txt
 ```

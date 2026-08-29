@@ -149,6 +149,31 @@ def _cmd_adp(args) -> int:
     return 0
 
 
+def _cmd_standings(args) -> int:
+    """F1 模拟战绩榜：SGP 投影用户阵容。"""
+    from .core.standings import ProjectedStandings
+    from .db import RosterRepository, db_session
+
+    with db_session() as conn:
+        roster = RosterRepository(conn).get_roster()
+    if roster.empty:
+        print("[错误] 阵容为空。先导入阵容：roster import <日志> 或 GUI「从最近模拟导入」")
+        return 1
+
+    result = ProjectedStandings().project(roster)
+    print(f"模拟战绩榜（联盟 {result['league_size']} 队，阵容相对平均队总 SGP："
+          f"{result['total_sgp']:+.2f}，总榜期望名次 {result['exp_total_rank']:.1f}）")
+    print("-" * 62)
+    print(f"{'类别':<6} {'你的队':>10} {'平均队':>10} {'SGP':>8} {'期望名次':>8}")
+    for r in result["categories"]:
+        rank_txt = f"{r['exp_rank']:.1f}" if r["exp_rank"] is not None else "—"
+        print(f"{r['category']:<6} {r['team_value']:>10} {r['league_avg']:>10} "
+              f"{r['sgp']:>+8.2f} {rank_txt:>8}")
+    print("\n说明：其他球队为统计模拟（P4a 接入后可用真实联盟数据）；"
+          "SGP 正=高于平均。")
+    return 0
+
+
 def _cmd_draft(args) -> int:
     from .core import SnakeDraftSimulator
 
@@ -389,6 +414,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--method", default="vorp", choices=["vorp", "sgp"],
                    help="评分方法：vorp（默认）或 sgp")
     p.set_defaults(func=_cmd_simulate)
+
+    # standings（F1 模拟战绩榜）
+    p = sub.add_parser("standings", help="模拟战绩榜（SGP 投影，需已导入阵容）")
+    p.set_defaults(func=_cmd_standings)
 
     # sleeper
     p = sub.add_parser("sleeper", help="Sleeper 推荐")

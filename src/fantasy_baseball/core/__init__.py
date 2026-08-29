@@ -1,6 +1,7 @@
 """核心业务逻辑层。
 
-统一的 VORP/风险计算、数据导入、选秀模拟、Sleeper 推荐、ADP、阵容验证。
+统一的 VORP/风险计算、数据导入、选秀模拟、Sleeper 推荐、ADP、阵容验证、
+模拟战绩榜。
 """
 
 from .adp import ADPCache, get_adp
@@ -10,6 +11,7 @@ from .monte_carlo import DraftEngine, simulate_drafts
 from .roster_validator import RosterValidator
 from .scoring import ScoringModel
 from .sleeper import find_sleepers
+from .standings import ProjectedStandings
 
 __all__ = [
     "ScoringModel",
@@ -21,4 +23,5 @@ __all__ = [
     "ADPCache",
     "get_adp",
     "RosterValidator",
+    "ProjectedStandings",
 ]

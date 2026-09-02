@@ -119,6 +119,35 @@ final_score   = overall_value × (1 + need_factor×0.5) × risk_adjustment
 - **need_factor**：阵容缺口（0~1），位置经 `_normalize_slot` 归一化（CF/RF/LF→OF、DH→UTIL、P→SP）
 - **is_mock**：真实数据不可用降级 mock 时标记，GUI 显示"（示例数据）"
 
+### 3.7 新秀雷达（`core/rookies.py`，F7）
+
+redraft 口径的选秀 sleeper 榜：Pipeline 天赋先验 × Statcast 分层高阶数据 × ADP 价值差。
+
+```
+composite = 0.45×talent_prior + 0.25×metric_score + 0.20×proximity_score + 0.10×value_score
+talent_prior = (榜容量+1−pipeline_rank)/榜容量     # 先验主权重
+metric_score = 同层同类型池内各子指标百分位均值     # 方向按指标定义（K% 反向）
+value_gap    = adp_rank − pipeline_rank（正=市场低估），clip[-50,200] 归一
+```
+
+**四层数据模型**（高层覆盖低层，逐行标注 tier，优先级 A > B > D > C）：
+
+| 层 | 数据 | 覆盖 | 来源 |
+|----|------|------|------|
+| A | MLB Statcast 百分位 | 已登板球员 | 复用 SavantLeaderboard（懒加载，仅在板上有已登板者时拉取） |
+| B | MiLB Statcast 聚合 | 有公开 tracking 者（AAA+Single-A；**AA 无公开数据**） | statcast-search-minors 批量 CSV |
+| D | 春训聚合（game_type=S） | 选秀窗口显式启用 | statcast_search 逐人查询 |
+| C | Pipeline 内嵌比率统计（K%/BB%） | 全员兜底 | Pipeline var data（MLB 预计算百分数） |
+
+MiLB 计数类（HR/RBI 总量）刻意不进因子（低阶注水）；K%/BB% 跨级别迁移性最好。
+接近度（proximity）为启发式：levels 标记 + 年龄 + 是否命中 tracking 索引
+（Pipeline 页面无 ETA 字段），分 已登板/近/中/远，默认剔除"远"。
+
+**新秀加成标签**（`fa/analyzer.py::_apply_rookie_boost`）：默认关
+（`fa_analyzer.rookie_boost.enabled`），开启后 multiplier = 1 + factor × composite
+（factor 默认 0.05 → 最高约 +4%）只作用于 FA 排序乘子，不改 VORP/SGP 核心数字；
+索引只读 `prospect_snapshots` DB 快照，分析链路不阻塞网络。
+
 ---
 
 ## 4. 数据层
@@ -167,9 +196,12 @@ final_score   = overall_value × (1 + need_factor×0.5) × risk_adjustment
 | 模块 | 源 | 说明 |
 |------|----|------|
 | projections.py | FantasyPros HTML | html.parser 零依赖解析；列映射对齐内部格式；`eligible_pos` 多位置提取；PA≈AB+BB |
-| mlb_api.py | MLB Stats API | 球员搜索/统计/伤病（transactions 解析）/近 10 场趋势；网络失败 raise（与"无数据"区分）；JSON 缓存 6h |
+| adp.py deep ADP | FantasyPros 位置页并集 | overall+9 位置页 ADP 并集（~1000 人，全榜口径），overall 优先回填缺失；雷达专用，24h JSON 缓存不落库 |
+| mlb_api.py | MLB Stats API | 球员搜索/统计/伤病（transactions 解析）/近 10 场趋势；批量 currentTeam+当季 MLB 出场数（雷达级别归因）与球队级别映射（30 天缓存）；网络失败 raise（与"无数据"区分）；JSON 缓存 6h |
 | statcast.py | Baseball Savant CSV | 打者/投手聚合；mock 兜底带降级语义 |
 | savant_leaderboard.py | Baseball Savant 排行榜 | 百分位/期望统计全联盟快照（CSV 端点，team= 参数），评分基准归一 + 运气指数，7 天缓存 |
+| pipeline.py | MLB Pipeline 页面 | Top 榜内嵌 var data JSON（含 MLBAM id/年龄/级别标记/当季统计）；域名白名单+重定向逐跳校验；7 天缓存 |
+| milb_statcast.py | Savant MiLB/春训 CSV | 小联盟聚合批查询（level 参数被服务端忽略，返回全部 tracked 级别）与春训逐人查询；7 天缓存 |
 
 抓取通用约束：urllib + 浏览器 UA、JSON/CSV 缓存（`data/cache/`，mtime TTL）、全部免费无 key、断网可降级。
 
@@ -245,12 +277,17 @@ final_score   = overall_value × (1 + need_factor×0.5) × risk_adjustment
 | bat 一律 GBK | UTF-8+chcp 在 cmd 下解析错乱（run_cli 与 build 均踩坑） |
 | 会话表用追加而非替换 | 支持多顺位模拟对比；session_id 含毫秒防同秒互删 |
 | DB 优先于文件 | 统一入库前 CSV 同名覆盖丢历史；现 DB=当前态，CSV=备份 |
+| MiLB 数据不整体替换为 Statcast | AA 无公开 Statcast（顶级新秀高发区），整体替换会让关键人群无数据；改为四层模型高层覆盖低层 |
+| Pipeline 榜单用页面内嵌 JSON | 官方无 REST API（statsapi 的 draft/prospects 是业余选秀榜，两回事）；页面客户端渲染但 var data 内嵌全量数据 |
+| 新秀加成默认关 | 评分变化必须显式授权（审计文化）；首季先观察雷达榜准确度 |
+| 选秀中心暂不接入加成 | 选秀模拟改分会破坏历史会话可比性；选秀准备用独立雷达榜 |
 
 ---
 
 ## 11. 已知限制与演进路线
 
 - **P4a ESPN 联盟接入**：方案已定稿（`docs/PLAN_P4_LEAGUE_PLATFORM.md`），LeagueProvider 抽象预留 Yahoo（大陆网络封锁暂缓）
+- F7 新秀雷达已落地（A/B/C 三层 + 级别归因 + deep ADP + 分带指标池；D 春训层实现就绪，选秀窗口启用）；二期方向：call-up 监控（transactions 端点已具备）、选秀中心新秀标签展示
 - F1 模拟战绩榜 / F2 GUI 表格化 / F3 Streaming 建议 / F4 交易评估 / F5 逐周对手 / F6 SGP 分母校准（见 TODO.md）
 - SGP 分母为 12 队经验值，未按联盟历史校准
 - risk model 的 z_score 假设同方差；numba 加速仅蒙特卡洛核心

@@ -221,6 +221,30 @@ CREATE TABLE IF NOT EXISTS fa_recommendations (
 )
 """
 
+# 新秀雷达快照（F7，会话式追加：一次抓取一个 fetched_at，
+# 保留 rank/composite 历史序列，供 rank 变动与 post-hype 检测使用）
+PROSPECT_SNAPSHOTS_SQL = """
+CREATE TABLE IF NOT EXISTS prospect_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    season INTEGER,
+    rank INTEGER,
+    name TEXT,
+    mlb_id INTEGER,
+    position TEXT,
+    age INTEGER,
+    team TEXT,
+    levels TEXT,
+    top_level TEXT,
+    proximity TEXT,
+    tier TEXT,
+    composite REAL,
+    value_gap REAL,
+    adp REAL,
+    payload TEXT,
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
 INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_hitters_name ON hitters(name)",
     "CREATE INDEX IF NOT EXISTS idx_pitchers_name ON pitchers(name)",
@@ -237,6 +261,8 @@ INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_rankings_query ON rankings(method, season, rank)",
     "CREATE INDEX IF NOT EXISTS idx_draft_logs_session ON draft_logs(session_id)",
     "CREATE INDEX IF NOT EXISTS idx_fa_recs_session ON fa_recommendations(session_id)",
+    "CREATE INDEX IF NOT EXISTS idx_prospect_snap_query ON prospect_snapshots(season, fetched_at)",
+    "CREATE INDEX IF NOT EXISTS idx_prospect_snap_name ON prospect_snapshots(name)",
 ]
 
 ALL_TABLE_SQL = [
@@ -253,6 +279,7 @@ ALL_TABLE_SQL = [
     RANKINGS_SQL,
     DRAFT_LOGS_SQL,
     FA_RECOMMENDATIONS_SQL,
+    PROSPECT_SNAPSHOTS_SQL,
 ]
 
 

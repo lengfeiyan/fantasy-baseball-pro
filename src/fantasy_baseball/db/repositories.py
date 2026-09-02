@@ -443,3 +443,66 @@ class RecommendationRepository(_BaseRepository):
 
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM fa_recommendations").fetchone()[0]
+
+
+class ProspectRepository(_BaseRepository):
+    """新秀雷达快照访问（F7，会话式追加：一次抓取一个 fetched_at）。
+
+    与 ADP 的"整体替换"语义不同——这里刻意保留历史批次，
+    同一球员的 rank/composite 序列是 post-hype 与 rank 变动检测的原始数据。
+    """
+
+    _COLUMNS = ("season", "rank", "name", "mlb_id", "position", "age", "team",
+                "levels", "top_level", "proximity", "tier", "composite",
+                "value_gap", "adp", "payload")
+
+    def save_snapshot(self, rows: Sequence[Dict[str, Any]], season: int,
+                      fetched_at: Optional[str] = None) -> int:
+        """追加一批快照（rows 为雷达输出行，payload 存完整行 JSON）。"""
+        if not rows:
+            return 0
+        import json
+        ts = fetched_at or _local_now()
+        self.conn.executemany(
+            """INSERT INTO prospect_snapshots(
+                   season, rank, name, mlb_id, position, age, team,
+                   levels, top_level, proximity, tier, composite,
+                   value_gap, adp, payload, fetched_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            [
+                (
+                    season, r.get("rank"), r.get("name"), r.get("mlb_id"),
+                    r.get("position"), r.get("age"), r.get("team"),
+                    r.get("levels"), r.get("top_level"), r.get("proximity"),
+                    r.get("tier"), r.get("composite"), r.get("value_gap"),
+                    r.get("adp"),
+                    json.dumps(r, ensure_ascii=False) if r.get("payload") is None else str(r["payload"]),
+                    ts,
+                )
+                for r in rows
+            ],
+        )
+        return len(rows)
+
+    def get_latest_snapshot(self, season: int) -> pd.DataFrame:
+        """该赛季最新一批快照（按 fetched_at 取最大值对应的整批）。"""
+        row = self.conn.execute(
+            "SELECT MAX(fetched_at) FROM prospect_snapshots WHERE season = ?",
+            (season,),
+        ).fetchone()
+        if not row or not row[0]:
+            return pd.DataFrame()
+        return pd.read_sql_query(
+            "SELECT * FROM prospect_snapshots WHERE season = ? AND fetched_at = ?"
+            " ORDER BY rank",
+            self.conn, params=(season, row[0]),
+        )
+
+    def rank_history(self, name: str, season: int) -> pd.DataFrame:
+        """单个球员的 rank/composite 历史序列（post-hype 检测用）。"""
+        return pd.read_sql_query(
+            "SELECT fetched_at, rank, composite, tier, proximity"
+            " FROM prospect_snapshots WHERE season = ? AND name = ?"
+            " ORDER BY fetched_at",
+            self.conn, params=(season, name),
+        )

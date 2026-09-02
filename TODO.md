@@ -1,7 +1,7 @@
 # 待办事项（TODO）
 
-> 最后更新：2026-08-29
-> 当前版本：2026.1.0 | 测试：217 passed | 已打包 Windows exe
+> 最后更新：2026-09-02
+> 当前版本：2026.1.0 | 测试：248 passed | 已打包 Windows exe（F7 未重打）
 
 ---
 
@@ -160,6 +160,23 @@
 ## ✅ 已完成项
 
 以下在本次开发中已实现，记录在此供追溯：
+
+### 2026-09-02 完成（F7 新秀雷达）
+- [x] 数据层：Pipeline Top 榜内嵌 JSON 抓取（94 人，含 MLBAM id，官方无 REST API 的
+      兜底考古结论见 TECHNICAL_DESIGN §5）；Savant MiLB 聚合批查询（实测 level 参数
+      被服务端忽略、AA 无公开 tracking）；春训 game_type=S 逐人查询
+- [x] 四层数据模型（A MLB百分位 / B MiLB Statcast / C 比率统计兜底 / D 春训），
+      高层覆盖低层、逐行标注层级；AA 盲区如实落 C 层不造数
+- [x] 接近度启发式（levels+年龄+tracking 证据）过滤 ETA 2028+（redraft 口径）
+- [x] CLI `rookies` 子命令 + GUI「新秀雷达」选项卡（F2 可排序表格）
+- [x] prospect_snapshots 快照表（会话式追加，rank 历史序列供 post-hype 检测）
+- [x] FA 推荐新秀加成标签：config fa_analyzer.rookie_boost 默认关，开启仅作排序
+      乘子（≤+4%），不改 VORP/SGP 核心数字；选秀中心暂不接入（保历史会话可比性）
+- 测试 217 → 238 passed（新增 21 个：解析/层级/比率刻度/端到端/快照/加成开关）
+- [x] 2026-09-02 增强：现属级别精确归因（批量 currentTeam+MLB GP 验证，实测纠正
+      Jenkins/Lombard/Clark 等 9 名 2026 真首秀的"已登板"判定，Pipeline 标记不含
+      MLB 时间）；deep ADP（overall+位置页并集 ~1000 人）；C 层指标池按级别带
+      细分（消除低级别 K% 注水偏置）——测试 +10（238 → 248）
 
 ### 2026-08-29 完成（F1 模拟战绩榜 + E1 重打包）
 - [x] F1 模拟战绩榜：core/standings.py（ProjectedStandings）——阵容各类别加总按 SGP 分母

@@ -13,11 +13,12 @@ from . import (
     fa_tab,
     home,
     plugins_tab,
+    rookies,
     roster,
     sleeper,
 )
 
 __all__ = [
     "home", "data", "config_tab", "analysis", "draft_center",
-    "roster", "sleeper", "fa_tab", "explore", "plugins_tab",
+    "roster", "sleeper", "fa_tab", "explore", "plugins_tab", "rookies",
 ]

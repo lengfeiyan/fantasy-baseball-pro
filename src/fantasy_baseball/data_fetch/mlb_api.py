@@ -19,7 +19,7 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-from ..config import resolve_path
+from ..config import get_season, resolve_path
 from ..utils.logger import get_logger
 
 logger = get_logger("data_fetch.mlb_api")
@@ -33,6 +33,12 @@ _INJURY_DAYS_TO_SEVERITY = {
     "10": "mild",       # 0.85
     "15": "moderate",   # 0.65
     "60": "severe",     # 0.40
+}
+
+# sportId → 级别标签（新秀雷达级别归因；1=MLB，11=AAA，12=AA，13=High-A，
+# 14=Single-A，16=新秀联盟。15（短季 A）联盟已不存在，teams 端点 404，不查）
+_LEVEL_BY_SPORT = {
+    1: "MLB", 11: "AAA", 12: "AA", 13: "A+", 14: "A", 16: "ROK",
 }
 
 
@@ -375,6 +381,73 @@ class MLBStatsClient:
         self._save_cache(cache_key, injuries)
         logger.info("抓取到 %d 条伤病动态（%s ~ %s）", len(injuries), start_date, end_date)
         return injuries
+
+    # -------------------------------------------------------------- 新秀雷达（F7）
+    def fetch_people_current_teams(self, person_ids: List[int],
+                                   season: Optional[int] = None) -> Dict[int, Dict[str, Any]]:
+        """批量查询球员现属球队 id 与当季 MLB 出场数（新秀雷达级别归因）。
+
+        ``hydrate=currentTeam,stats(...)`` 一次带回两样关键证据：
+        - currentTeam：小联盟球员=附属球队 id；**40 人名单球员=母队 MLB 组织 id**
+          （无法单凭它区分"已登板"与"在 40 人名单未升班"，须结合 MLB 出场数）
+        - 当季 sportId=1 出场数：GP>0 才算真登板
+
+        Returns:
+            {person_id: {"team_id": int|None, "mlb_gp": int}}；网络失败返回 {}。
+        """
+        if not person_ids:
+            return {}
+        ids = sorted({int(i) for i in person_ids})
+        season = season or get_season()
+        # v2：值结构从 {id: team_id} 升级为 {id: {team_id, mlb_gp}}，换键避开旧缓存
+        key = f"people_ct_v2_{season}_{hash(tuple(ids)) & 0xFFFFFFFF}"
+        cached = self._load_cache(key)
+        if cached is not None:
+            return {int(k): v for k, v in cached.items()}
+        result: Dict[int, Dict[str, Any]] = {}
+        for i in range(0, len(ids), 100):  # 批量端点按 100 人分片
+            chunk = ids[i:i + 100]
+            url = (f"{BASE_URL}/people?personIds={','.join(map(str, chunk))}"
+                   f"&hydrate=currentTeam,stats(group=[hitting,pitching],type=[season])")
+            data = _http_get_json(url, timeout=45)
+            if data is None:
+                logger.warning("批量 currentTeam 查询失败（%d 人分片）", len(chunk))
+                return {}
+            for person in data.get("people") or []:
+                team = person.get("currentTeam") or {}
+                mlb_gp = 0
+                for stat in person.get("stats") or []:
+                    for split in stat.get("splits") or []:
+                        if (split.get("sport") or {}).get("id") == 1:
+                            mlb_gp += split.get("stat", {}).get("gamesPlayed", 0) or 0
+                result[int(person["id"])] = {
+                    "team_id": team.get("id"), "mlb_gp": int(mlb_gp),
+                }
+        self._save_cache(key, result)
+        return result
+
+    def fetch_milb_team_level_map(self, season: Optional[int] = None) -> Dict[int, str]:
+        """小联盟/大联盟球队 id → 级别标签映射（new秀雷达级别归因用）。
+
+        按 sportId 拉各级别球队列表整包缓存 30 天（球队格局赛季内不变，
+        与 holds 同策略）。复杂联盟与新秀联盟统一归 ROK。
+        """
+        season = season or get_season()
+        key = f"team_level_map_{season}"
+        cached = self._load_cache(key)
+        if cached is not None:
+            return {int(k): v for k, v in cached.items()}
+        mapping: Dict[int, str] = {}
+        for sport_id, label in _LEVEL_BY_SPORT.items():
+            data = _http_get_json(f"{BASE_URL}/teams?sportId={sport_id}&season={season}")
+            if data is None:
+                logger.warning("球队级别映射查询失败: sportId=%s", sport_id)
+                continue
+            for team in data.get("teams") or []:
+                mapping[int(team["id"])] = label
+        if mapping:
+            self._save_cache(key, mapping)
+        return mapping
 
     # -------------------------------------------------------------- 缓存
     def _cache_file(self, key: str) -> str:

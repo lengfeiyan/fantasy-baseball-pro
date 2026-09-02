@@ -174,6 +174,49 @@ def _cmd_standings(args) -> int:
     return 0
 
 
+def _cmd_rookies(args) -> int:
+    """F7 新秀雷达：选秀 sleeper 榜（Pipeline 先验 + Statcast 分层数据）。"""
+    from .data_fetch.mlb_api import MLBStatsClient
+    from .core.rookies import RookieRadar
+
+    radar = RookieRadar(stats_client=MLBStatsClient())
+    df = radar.build(include_far=args.all, use_spring=args.spring, force=args.force)
+    if df.empty:
+        print("[错误] 雷达榜为空（Pipeline 无数据，或全部被接近度过滤）")
+        return 1
+    if args.position != "All":
+        df = df[df["position"] == args.position]
+        if df.empty:
+            print(f"[错误] 位置 {args.position} 无上榜新秀")
+            return 1
+    try:
+        saved = RookieRadar.save_snapshot(df)
+        if saved:
+            print(f"[完成] 快照已入库（{saved} 条，rank 历史序列供 post-hype 检测）")
+    except Exception as e:
+        print(f"[提示] 快照入库失败（不影响榜单）: {e}")
+
+    df = df.head(args.top)
+    print(f"新秀雷达（{len(df)} 人，数据层级 A=MLB百分位 B=MiLB Statcast "
+          f"C=比率统计 D=春训；接近度按现属级别归因/启发式）")
+    print("=" * 100)
+    print(f"{'综合':>6} {'榜':>4} {'姓名':<20} {'位':<4} {'队':<4} {'龄':>3} {'级':<5} "
+          f"{'层':<2} {'近度':<4} {'信号':<36} {'ADP':>6} {'差值':>5}")
+    print("-" * 100)
+    for _, r in df.iterrows():
+        adp = r["adp"]
+        adp_txt = f"{adp:.0f}" if adp == adp and adp is not None else "—"
+        gap = r["value_gap"]
+        gap_txt = f"{gap:+.0f}" if gap == gap and gap is not None else "—"
+        print(f"{r['composite']:>6.3f} {r['pipeline_rank']:>4.0f} {r['name'][:20]:<20} "
+              f"{r['position']:<4} {str(r['team']):<4} {r['age']:>3.0f} {str(r['level']):<5} "
+              f"{r['tier']:<2} {r['proximity']:<4} {r['signals'][:36]:<36} {adp_txt:>6} {gap_txt:>5}")
+    print("\n说明：差值 = ADP顺位 − 榜单顺位，正数越大 = 市场越低估（deep ADP 已并入）；"
+          "层级 C 为比率统计兜底（AA 无公开 Statcast 属正常）。"
+          "加成标签在 config fa_analyzer.rookie_boost（默认关）。")
+    return 0
+
+
 def _cmd_draft(args) -> int:
     from .core import SnakeDraftSimulator
 
@@ -418,6 +461,15 @@ def build_parser() -> argparse.ArgumentParser:
     # standings（F1 模拟战绩榜）
     p = sub.add_parser("standings", help="模拟战绩榜（SGP 投影，需已导入阵容）")
     p.set_defaults(func=_cmd_standings)
+
+    # rookies（F7 新秀雷达）
+    p = sub.add_parser("rookies", help="新秀雷达（选秀 sleeper 榜，Pipeline + Statcast 分层）")
+    p.add_argument("--top", type=int, default=20, help="显示前 N 人")
+    p.add_argument("--position", default="All", help="按位置过滤（如 SS/RHP）")
+    p.add_argument("--all", action="store_true", help="包含「远」接近度（ETA 2028+，redraft 一般用不上）")
+    p.add_argument("--spring", action="store_true", help="启用春训数据（选秀窗口 2-3 月才新鲜）")
+    p.add_argument("--force", action="store_true", help="强刷数据缓存（默认 7 天）")
+    p.set_defaults(func=_cmd_rookies)
 
     # sleeper
     p = sub.add_parser("sleeper", help="Sleeper 推荐")

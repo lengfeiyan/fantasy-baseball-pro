@@ -11,6 +11,7 @@ from .repositories import (
     FaRepository,
     InjuryRepository,
     PlayerRepository,
+    ProspectRepository,
     RankingsRepository,
     RecommendationRepository,
     RosterRepository,
@@ -29,5 +30,6 @@ __all__ = [
     "AdpRepository",
     "RankingsRepository",
     "DraftLogRepository",
+    "ProspectRepository",
     "RecommendationRepository",
 ]

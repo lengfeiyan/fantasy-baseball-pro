@@ -25,6 +25,7 @@ from .tabs import (
     explore,
     fa_tab,
     home,
+    rookies,
     roster,
     sleeper,
 )
@@ -47,6 +48,7 @@ TAB_BUILDERS = [
     ("选秀中心", draft_center.create_tab),
     ("阵容验证", roster.create_tab),
     ("Sleeper挖掘", sleeper.create_tab),
+    ("新秀雷达", rookies.create_tab),
     ("FA分析", fa_tab.create_tab),
     ("数据探索", explore.create_tab),
 ]

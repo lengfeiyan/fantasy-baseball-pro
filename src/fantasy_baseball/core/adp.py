@@ -17,11 +17,11 @@ import os
 import re
 import time
 from html.parser import HTMLParser
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 
-from ..config import get_config, history_path, output_path, resolve_path, write_csv_atomic
+from ..config import get_config, get_season, history_path, output_path, resolve_path, write_csv_atomic
 from ..utils.logger import get_logger
 
 logger = get_logger("adp")
@@ -246,6 +246,103 @@ def fetch_real_adp(url: str = FANTASYPROS_URL) -> pd.DataFrame:
     df = parse_adp_html(html)
     logger.info("成功抓取 %d 名球员的真实 ADP", len(df))
     return df
+
+
+# -------------------------------------------------------------- deep ADP（F7 新秀雷达）
+
+# overall 榜只覆盖 ~600 人，新秀大多在榜尾之外；位置页的 ADP 列同为全榜口径
+# （实测 sp 页最大 904.5），并集可把覆盖拉到 ~1000 人。overall 值优先，
+# 位置页只回填缺失姓名。
+_DEEP_ADP_PAGES = ("overall", "sp", "rp", "of", "ss", "3b", "2b", "1b", "c", "dh")
+_DEEP_ADP_URL = "https://www.fantasypros.com/mlb/adp/{page}.php?print=true"
+_DEEP_CACHE_TTL_HOURS = 24  # 雷达辅助数据，日级新鲜度足够
+
+_ROW_RE = re.compile(r'<tr class="mpb-player-\d+">((?:(?!</tr>).)*)</tr>', re.S)
+_NAME_ATTR_RE = re.compile(r'fp-player-name="([^"]+)"')
+
+
+def _parse_deep_adp_html(html: str) -> Dict[str, float]:
+    """deep ADP 页专用解析：行内 ``fp-player-name`` 属性取姓名，末个 ``<td>`` 为
+    各家均值（全榜口径）。
+
+    位置页比 overall 页多一个位置顺位列，共享解析器 parse_adp_html 会把
+    顺位误读成姓名——这里直接按属性取名，对两种页面统一适用。
+    非数值末列（"-" 等占位）跳过。
+    """
+    out: Dict[str, float] = {}
+    for row_m in _ROW_RE.finditer(html):
+        row = row_m.group(1)
+        name_m = _NAME_ATTR_RE.search(row)
+        if not name_m:
+            continue
+        tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+        if not tds:
+            continue
+        last = re.sub(r"<[^>]+>", "", tds[-1]).strip()
+        try:
+            adp = float(last)
+        except ValueError:
+            continue
+        name = " ".join(name_m.group(1).split())
+        if name:
+            out[name] = adp
+    return out
+
+
+def fetch_deep_adp(force: bool = False,
+                   cache_ttl_hours: int = _DEEP_CACHE_TTL_HOURS,
+                   cache_dir: Optional[str] = None) -> Optional[pd.DataFrame]:
+    """deep ADP（overall + 9 个位置页并集，约 1000 人）。
+
+    新秀雷达专用补充源：整体写入 DB/CSV 会改变主 ADP 链路语义（五级回退、
+    TTL、历史备份均为 overall 榜口径），故只做模块内 JSON 缓存、不落库。
+    全部页面失败返回 None（调用方降级到主 ADP）。
+    """
+    from ..data_fetch.mlb_api import MLBStatsClient  # 局部导入防循环依赖
+    store = MLBStatsClient(cache_dir=cache_dir, cache_ttl_hours=cache_ttl_hours)
+    season = get_season()
+    key = f"deep_adp_{season}"
+    if not force:
+        cached = store._load_cache(key)
+        if cached is not None:
+            return pd.DataFrame(cached)
+    merged: Dict[str, float] = {}
+    ok_pages = 0
+    for page in _DEEP_ADP_PAGES:
+        try:
+            html = _fetch_html(_DEEP_ADP_URL.format(page=page))
+            rows = _parse_deep_adp_html(html)
+        except Exception as e:
+            logger.debug("deep ADP 页面抓取失败 (%s): %s", page, e)
+            continue
+        if not rows:
+            continue
+        ok_pages += 1
+        for name, adp in rows.items():
+            if name not in merged:  # overall 先行，位置页只回填缺失姓名
+                merged[name] = adp
+        if page != "overall":
+            time.sleep(0.3)  # 位置页礼貌间隔，降低被限流概率
+    if not ok_pages:
+        logger.warning("deep ADP 全部页面抓取失败")
+        return None
+    df = pd.DataFrame(
+        [{"name": n, "adp": a} for n, a in sorted(merged.items(), key=lambda kv: kv[1])]
+    )
+    logger.info("deep ADP 合并完成：%d 人（%d/%d 页成功）", len(df), ok_pages,
+                len(_DEEP_ADP_PAGES))
+    store._save_cache(key, df.to_dict("records"))
+    return df
+
+
+def get_deep_adp(force: bool = False) -> Optional[pd.DataFrame]:
+    """deep ADP 入口：缓存优先，失败返回 None（与 get_adp 的 mock 降级不同——
+    雷达侧拿不到 deep 数据时直接用主 ADP，不引入示例数据）。"""
+    try:
+        return fetch_deep_adp(force=force)
+    except Exception as e:
+        logger.debug("deep ADP 不可用: %s", e)
+        return None
 
 
 class ADPCache:

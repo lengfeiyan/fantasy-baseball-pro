@@ -122,6 +122,12 @@ fa_analyzer:
     expiry: 24
     # 缓存目录
     directory: "data/cache"
+  # 新秀雷达加成（F7）：读取 prospect_snapshots 最新快照，对上榜球员
+  # 按雷达综合分温和加成（multiplier = 1 + factor × composite，最高约 +4%）。
+  # 默认关闭——首季先观察雷达榜准确度，信任建立后手动开启
+  rookie_boost:
+    enabled: false
+    factor: 0.05
 
 # SGP（Standings Gain Points）配置
 # 与 VORP 并行的另一种评分体系，专为 5×5 Roto 联盟设计

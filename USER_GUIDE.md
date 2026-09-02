@@ -271,7 +271,30 @@ player_id,name,team,pos,status
 **伤病报告**：
 - 点击「查看伤病」显示数据库中的伤病列表
 
-### 4.10 插件管理（暂时屏蔽）
+### 4.10 新秀雷达
+
+面向 redraft 联盟的选秀 sleeper 榜：从 MLB Pipeline 天赋榜出发，融合 Statcast
+高阶数据，回答"明年开季谁就能出数据、且 ADP 还便宜"。
+
+**数据层级**（逐行标注，高层覆盖低层）：
+- **A** MLB Statcast 百分位（已登板球员）
+- **B** MiLB Statcast（EV / 对手xwOBA / 挥空率；仅 AAA 与 Single-A 有公开 tracking）
+- **C** 比率统计兜底（K%/BB%，抗低阶注水；AA 无公开 Statcast 属正常，如实标注）
+- **D** 春训（选秀窗口 2-3 月勾选启用）
+
+**使用**：
+- 点「生成榜单」：显示综合分排序的雷达榜，"差值"= ADP 顺位 − 榜单顺位，
+  正数越大说明市场越低估（价值区）
+- 「级」列显示球员现属级别（精确归因：含 9 月升班等真实大联盟出场验证；
+  归因不可用时显示 Pipeline 级别标记）
+- 「含远期」勾选后会保留 ETA 2028+ 的纯潜力股（redraft 一般用不上）
+- 每次生成会写入数据库快照（prospect_snapshots），供后续 rank 变动 / post-hype 检测
+- FA 推荐的「新秀加成」默认关闭（config.yaml `fa_analyzer.rookie_boost`），
+  首季建议先观察雷达榜准确度，信任建立后手动开启
+- ADP 列并入位置页深榜（约 1000 人覆盖）；9 月大部分明年新秀尚无人竞价，
+  ADP 显示"—"属正常，选秀季（2-3 月）数据会自然补齐
+
+### 4.11 插件管理（暂时屏蔽）
 
 插件系统与 `plugins/` 目录（每个插件一个子目录，含 `__init__.py`）仍然保留，
 界面入口暂时屏蔽；需要时在 `gui/app.py` 的 TAB_BUILDERS 加回一行即可。
@@ -395,7 +418,24 @@ python -m fantasy_baseball mlb "Aaron Judge" --season 2025
 python -m fantasy_baseball mlb "Aaron Judge" --season 2025 --statcast
 ```
 
-### 5.9 GUI
+### 5.9 新秀雷达
+
+```bash
+# 生成雷达榜（默认前 20 人）
+python -m fantasy_baseball rookies
+
+# 只看游击手，包含远期潜力股，强刷 7 天缓存
+python -m fantasy_baseball rookies --position SS --all --force
+
+# 选秀窗口（2-3 月）启用春训数据
+python -m fantasy_baseball rookies --spring
+```
+
+参数：`--top N` 显示前 N 人；`--position` 位置过滤；`--all` 含"远"接近度
+（ETA 2028+）；`--spring` 启用春训层；`--force` 强刷缓存。
+每次运行自动写入快照（rank 历史序列）。
+
+### 5.10 GUI
 
 ```bash
 python -m fantasy_baseball gui

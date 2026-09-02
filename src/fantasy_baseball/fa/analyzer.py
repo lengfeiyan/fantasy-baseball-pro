@@ -122,6 +122,12 @@ class FAAnalyzer:
                     luck_adj = 1.03   # 运气差，真实实力被低估
         overall = overall * luck_adj
 
+        # F7 新秀加成：默认关（config fa_analyzer.rookie_boost.enabled）。
+        # 只作用于排序乘子，不改 VORP/SGP 核心数字；强度随雷达综合分线性缩放
+        rookie_boost = self._apply_rookie_boost(str(stats.get("name") or ""))
+        if rookie_boost is not None:
+            overall = overall * rookie_boost["multiplier"]
+
         return {
             "player_id": player_id,
             "name": stats.get("name"),
@@ -135,9 +141,44 @@ class FAAnalyzer:
             # S2 运气指数（wOBA − xwOBA，正 = 虚高；None = 无记录/快照不可用）
             "woba_luck": woba_luck,
             "luck_adjustment": luck_adj if luck_adj != 1.0 else None,
+            # F7 新秀信号（开关关闭或未上榜时为 None）
+            "rookie_boost": rookie_boost,
             # 真实数据不可用时降级到 mock 统计（real_time 标注），上层展示时提示
             "is_mock": bool(stats.get("is_mock", False)),
         }
+
+    # F7：新秀雷达快照索引（懒加载，只读 DB 快照——分析链路禁止阻塞网络）
+    _rookie_index: Optional[Dict[str, float]] = None
+
+    def _apply_rookie_boost(self, name: str) -> Optional[Dict[str, Any]]:
+        """开关开启且球员在新秀雷达快照中时，返回加成信息（否则 None）。
+
+        multiplier = 1 + factor × composite（composite ∈ [0,1]，factor 默认 0.05，
+        即最高约 +4% 排序权重——温和倾斜，不颠覆既有评分次序的核心部分）。
+        """
+        cfg = (get_config().get("fa_analyzer", {}).get("rookie_boost") or {})
+        if not cfg.get("enabled"):
+            return None
+        if FAAnalyzer._rookie_index is None:
+            FAAnalyzer._rookie_index = {}
+            try:
+                from ..config import get_season
+                from ..db import ProspectRepository, db_session
+                with db_session() as conn:
+                    snap = ProspectRepository(conn).get_latest_snapshot(get_season())
+                for _, r in snap.iterrows():
+                    key = " ".join(str(r.get("name") or "").split()).casefold()
+                    comp = _safe_f(r.get("composite"))
+                    if key and comp is not None:
+                        FAAnalyzer._rookie_index[key] = comp
+            except Exception as e:
+                logger.debug("新秀雷达快照不可用，加成跳过: %s", e)
+        composite = FAAnalyzer._rookie_index.get(" ".join(name.split()).casefold())
+        if composite is None:
+            return None
+        factor = _safe_f(cfg.get("factor")) or 0.05
+        return {"composite": composite, "factor": factor,
+                "multiplier": 1.0 + factor * max(0.0, min(1.0, composite))}
 
     def _calculate_base_score(self, player_stats: Dict[str, Any]) -> float:
         pos = player_stats.get("pos", "")
